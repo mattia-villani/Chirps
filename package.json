@@ -37,7 +37,9 @@
     "concurrently": "^3.1.0",
     "nodemon": "^1.11.0",
     "source-map-loader": "^0.1.5",
-    "watchify": "3.7.0"
+    "watchify": "3.7.0",
+    "webpack": "^1.13.3",
+    "webpack-dev-server": "^1.16.2"
   },
   "engine": {
     "node": ">=0.8.x"
