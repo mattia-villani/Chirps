@@ -31,6 +31,7 @@ antidote.defaultBucket = "chirps";
 
 // global set of all user ids
 let userSet = antidote.set("users")
+let user2pass = antidote.map("user2pass")
 
 // each user has a timeline with the Chirps he can read
 let timeline = (user) => antidote.set(`timeline_${user}`);
@@ -43,6 +44,10 @@ let timeline = (user) => antidote.set(`timeline_${user}`);
 antidote.update(userSet.add('Donald'))
   .then(_ => console.log(`Inserted dummy user`))
   .catch(err => console.log(`Could not insert dummy user `, err));
+antidote.update(user2pass.register('Donald').set('passwd'))
+    .then(_=>console.log('Inserted entry Donald,passwd'))
+    .catch(err => console.log('Could not insert user2pass'))
+
 
 function currentUser(request) {
   // return fake user
@@ -52,6 +57,10 @@ function currentUser(request) {
 
 // ----- APP ----- //
 server.get('/', function (req, res, next) {
+  res.sendfile('public/index.html');
+});
+
+server.get('/login', function (req, res, next) {
   res.sendfile('public/index.html');
 });
 
@@ -162,6 +171,32 @@ server.post('/api/clearChirps', handle(async req => {
   );
   return "database cleared\n";
 }));
+
+/**
+ * check if the credentials are corrected, if not, this fails
+ */
+server.get('/api/validCredentials/:user', async function(req, res, next){
+  let user = req.params.user;
+  let password = req.body?req.body[0]:undefined;
+  if ( !user || !password )
+    res.status(401).send("bad login"); 
+  else 
+    antidote
+      .map("user2pass")
+      .register(user)
+      .read()
+        .then( storedPasswd => {
+          if ( storedPasswd == password )
+            res.send(`[${user},${password}]`);
+          else   
+              res.status(403).send("invalid credentials");
+        } )
+        .catch( e =>{ 
+          console.log(e)
+          res.status(401).send("bad login"); 
+        });
+});
+
 
 // ----- start server -----
 http.createServer(server).listen(server.get('port'), function () {
