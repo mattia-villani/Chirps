@@ -7,6 +7,7 @@ let antidoteClient = require( 'antidote_ts_client');
 let errorhandler = require('errorhandler');
 let morgan = require('morgan');
 let bodyParser = require('body-parser');
+let expressValidator = require('express-validator');
 
 let server = express();
 
@@ -15,6 +16,7 @@ let publicDir = path.join(__dirname, '../../public');
 server.set('port', process.env.PORT || 1337);
 server.use(morgan('combined')); // Logger
 server.use(bodyParser.json());
+server.use(expressValidator());
 
 server.use(express.static(publicDir));
 
@@ -36,6 +38,21 @@ let user2mail = antidote.map("user2mail")
 
 // each user has a timeline with the Chirps he can read
 let timeline = (user) => antidote.set(`timeline_${user}`);
+
+
+//------
+/**
+ *  description
+ *  -> userSet = antidote.set("users") 
+ *    made of records of the type :
+ *      { 
+ *        userID: <unique identifier: <number>_user>,
+ *        name: <user\' name>,    
+ *        password: <password>,
+ *        email: <email>
+ *      }
+ */
+
 
 //---
 // Demo setup:
@@ -83,6 +100,13 @@ function handle(handler) {
       .then(r => res.send(r))
       .catch(next)
   };
+}
+function handleWithRes(handler) {
+  return (req, res, next) => {
+    handler(req,res)
+      .then(r => res.send(r))
+      .catch(next)
+  };  
 }
 
 /**
@@ -180,100 +204,84 @@ server.post('/api/clearChirps', handle(async req => {
 /**
  * Register user to the server
  */
-server.post('/api/register/', async function(req, res, next){
+server.post('/api/register/', handleWithRes( async (req, res) => {
     let data = req.body
     let user = data.user;
     let password = data.password;
     let mail = data.mail;
-    console.log("starting to register "+JSON.stringify(data) );
-    if ( !user || !password || !mail ) 
-      throw {status:406, mesg :"Empty values"};
-    else if (! validateEmail(mail))
-      throw {status:406, mesg :"Email not valid"};
-    var tx ;
 
-    
-    try{// strong concistency? no
-      tx = await antidote.startTransaction()
-        .catch(e=>{throw {status:500, mesg :"Failled to start transition"}})
-      let users = await tx.set('users').read()
-        .catch(e=>{throw {status:500, mesg :"Failled to read users"}});
-      if ( user in users )
-        throw {status:400, mesg :"User already registred"};
-      await /*Promise.all[
-        tx.map("user2pass").register(user).set(password),
-        tx.map("user2mail").register(user).set(mail),
- */     tx.set('users').add(user)
-          .catch(e=>{throw {status:500, mesg :"Failled to read users"}})
-//      ]
-      await tx.commit()
-        .catch(e=>{throw {status:500, mesg :"Failled to commit"}}); 
-      res.status(201).send(JSON.stringify({user:user}));
+    let a_user = { 
+      userID: Date.now()+user,
+      name: user,    
+      password: password,
+      email: email
+    }
+    // validation
+    var err = undefined;
+    if ( !user || !password || !mail ) 
+      err = {status:406, mesg :"Empty values"};
+//    req.assert(mail, {status:406, mesg :'valid email required'}).isEmail();
+
+    if ( err )
+      return res
+          .status(e.status?e.status:500)
+          .send(e.mesg ? e.mesg : e);
+
+    // 
+    console.log("starting to register "+JSON.stringify(data) );
+    try{
+        /*
+        let users = await tx.set('users').read()
+          .catch(e=>{throw {status:500, mesg :"Failled to read users"}});
+        if ( user in users )
+          throw {status:400, mesg :"User already registred"};
+          */ // no es atomic. 
+        await antidote.update([
+              userSet.add(user),
+              user2pass.register(user).set(password),
+              user2mail.register(user).set(mail)    
+        ])
+        .then(_=>{res.status(201).send(JSON.stringify({user:user}))})
+        .catch(e=>{throw {status:500, mesg :"Failled to add user"}})
     }catch( e ){
         res
           .status(e.status?e.status:500)
           .send(e.mesg ? e.mesg : e);
-        console.error(e);
+        console.error(e)
         if ( e.stack )
-          console.error("STACK TRACE :" + e.stack);
-    }finally{
-      if ( tx ) await tx.commit().catch(e=>{console.error(e);});
-        // abort transition ? 
+          console.error("STACK TRACE :" + e.stack)
     }
-})
+} ) )
 
 /**
  * check if the credentials are corrected, if not, this fails
  */
-server.post('/api/validCredentials/', async function(req, res, next){
-  try{
-    let credentials = req.body
-    let user = credentials.user;
-    let password = credentials.password;
-    if ( !user || !password ) throw "empty credentials";  
-    (antidote
-      .map("user2pass")
-      .register(user)
-      .read()
-        .then( storedPasswd => {
-          if ( storedPasswd == password )
-            res.send(JSON.stringify({user:user}));
-          else   
-              res.status(403).send("invalid credentials");
-        } ))
-  }catch(e){
-      res
-        .status(401)
-        .send("bad login " + e)
-      console.log(e);
-  }
-
-  /**
-   * Utilitis 
-   *//*
-  async function returnOkIfCredentialsAreFine(user, passwd){
-    if ( !user || !password ) return "empty credentials";  
-    (antidote
-      .map("user2pass")
-      .register(user)
-      .read()
-        .then( storedPasswd => {
-          if ( storedPasswd == password )
-            return "ok";
-          else   
-              return "invalid credentials";
-        } ))
-  }*/
-});
+server.post('/api/validCredentials/', handleWithRes(async (req, res) => {
+  let credentials = req.body
+  let user = credentials.user;
+  let password = credentials.password;
+  if ( !user || !password ) 
+    res.status(401).send("empty credentials")
+  (antidote
+    .map("user2pass")
+    .register(user)
+    .read()
+      .then( storedPasswd => {
+        if ( storedPasswd == password )
+          res.send(JSON.stringify({user:user}));
+        else   
+            res.status(403).send("invalid credentials");
+      } )
+      .catch(e=>{
+          res
+            .status(401)
+            .send("bad login " + e)
+          console.log(e);
+      }))
+}));
 
 
 // ----- start server -----
 http.createServer(server).listen(server.get('port'), function () {
   console.log("Express server listening on port " + server.get('port'));
-});
-
-// http://stackoverflow.com/questions/46155/validate-email-address-in-javascript
-function validateEmail(email) {
-    var re = /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
-    return re.test(email);
-}
+})
