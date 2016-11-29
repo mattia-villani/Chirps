@@ -1,23 +1,22 @@
 import * as axios from 'axios'
 import cookie from 'react-cookie';
 
-
-export function getTokenFromCookies(){
-	if (cookie)	
-		return createToken(cookie.load('user'), cookie.load('password'));
-	else return createToken(undefined,undefined);}
-export function createToken(user, password){
-	return (token = {
-		user: user,
-		password: password,
-	});}
-export function isTokenAuth(){return token && token.user && token.password;}
-export function getToken(){return token;}
-export function saveToken(){
-	cookie.save('user', token.user, { path: '/' });
-	cookie.save('password', token.password, { path: '/' });
+export function removeLoginValues(){
+	cookie.save(null);
+	cookie.remove('loginValues');
 }
-var token = getTokenFromCookies();
+export function saveLoginValues( obj ){
+	cookie.save('loginValues', JSON.stringify(obj), {path:'/'});
+}
+export function getLoginValues( ){
+	let vars = cookie.load('loginValues');
+	if ( vars ){ 
+		let parsed = vars;
+		if ( parsed && parsed.user && parsed.password )
+			return parsed;
+	}
+	return undefined;
+}
 
 
 export async function getTimeline() {
@@ -34,7 +33,7 @@ export async function saveChirp(chirp) {
 	let res = await axios.post('/api/chirps', chirp);
 	return res.data;
 }
-
+/*
 export async function checkCredentialsValidity(token) {
 	if ( token && token.user && token.password ){
 		let res = await axios.get('/api/validCredentials/'+token.user, token.password);
@@ -43,4 +42,4 @@ export async function checkCredentialsValidity(token) {
 			throw new Error( res.statusText );
 		return res.data;
 	}else throw new Error( "Empty credentials" );
-}
+}*/

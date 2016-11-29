@@ -32,6 +32,7 @@ antidote.defaultBucket = "chirps";
 // global set of all user ids
 let userSet = antidote.set("users")
 let user2pass = antidote.map("user2pass")
+let user2mail = antidote.map("user2mail")
 
 // each user has a timeline with the Chirps he can read
 let timeline = (user) => antidote.set(`timeline_${user}`);
@@ -44,9 +45,13 @@ let timeline = (user) => antidote.set(`timeline_${user}`);
 antidote.update(userSet.add('Donald'))
   .then(_ => console.log(`Inserted dummy user`))
   .catch(err => console.log(`Could not insert dummy user `, err));
-antidote.update(user2pass.register('Donald').set('passwd'))
-    .then(_=>console.log('Inserted entry Donald,passwd'))
-    .catch(err => console.log('Could not insert user2pass'))
+antidote.update(
+  [
+    user2pass.register('Donald').set('passwd'),
+    user2mail.register('Donald').set('donald@mail.com'),    
+  ])
+    .then(_=>console.log('Inserted entry Donald,passwd,donald@mail.com'))
+    .catch(err => console.log('Could not insert user2pass or user2mail'))
 
 
 function currentUser(request) {
@@ -173,28 +178,92 @@ server.post('/api/clearChirps', handle(async req => {
 }));
 
 /**
+ * Register user to the server
+ */
+server.post('/api/register/', async function(req, res, next){
+    let data = req.body
+    let user = data.user;
+    let password = data.password;
+    let mail = data.mail;
+    console.log("starting to register "+JSON.stringify(data) );
+    if ( !user || !password || !mail ) 
+      throw {status:406, mesg :"Empty values"};
+    else if (! validateEmail(mail))
+      throw {status:406, mesg :"Email not valid"};
+    var tx ;
+
+    
+    try{// strong concistency? no
+      tx = await antidote.startTransaction()
+        .catch(e=>{throw {status:500, mesg :"Failled to start transition"}})
+      let users = await tx.set('users').read()
+        .catch(e=>{throw {status:500, mesg :"Failled to read users"}});
+      if ( user in users )
+        throw {status:400, mesg :"User already registred"};
+      await /*Promise.all[
+        tx.map("user2pass").register(user).set(password),
+        tx.map("user2mail").register(user).set(mail),
+ */     tx.set('users').add(user)
+          .catch(e=>{throw {status:500, mesg :"Failled to read users"}})
+//      ]
+      await tx.commit()
+        .catch(e=>{throw {status:500, mesg :"Failled to commit"}}); 
+      res.status(201).send(JSON.stringify({user:user}));
+    }catch( e ){
+        res
+          .status(e.status?e.status:500)
+          .send(e.mesg ? e.mesg : e);
+        console.error(e);
+        if ( e.stack )
+          console.error("STACK TRACE :" + e.stack);
+    }finally{
+      if ( tx ) await tx.commit().catch(e=>{console.error(e);});
+        // abort transition ? 
+    }
+})
+
+/**
  * check if the credentials are corrected, if not, this fails
  */
-server.get('/api/validCredentials/:user', async function(req, res, next){
-  let user = req.params.user;
-  let password = req.body?req.body[0]:undefined;
-  if ( !user || !password )
-    res.status(401).send("bad login"); 
-  else 
-    antidote
+server.post('/api/validCredentials/', async function(req, res, next){
+  try{
+    let credentials = req.body
+    let user = credentials.user;
+    let password = credentials.password;
+    if ( !user || !password ) throw "empty credentials";  
+    (antidote
       .map("user2pass")
       .register(user)
       .read()
         .then( storedPasswd => {
           if ( storedPasswd == password )
-            res.send(`[${user},${password}]`);
+            res.send(JSON.stringify({user:user}));
           else   
               res.status(403).send("invalid credentials");
-        } )
-        .catch( e =>{ 
-          console.log(e)
-          res.status(401).send("bad login"); 
-        });
+        } ))
+  }catch(e){
+      res
+        .status(401)
+        .send("bad login " + e)
+      console.log(e);
+  }
+
+  /**
+   * Utilitis 
+   *//*
+  async function returnOkIfCredentialsAreFine(user, passwd){
+    if ( !user || !password ) return "empty credentials";  
+    (antidote
+      .map("user2pass")
+      .register(user)
+      .read()
+        .then( storedPasswd => {
+          if ( storedPasswd == password )
+            return "ok";
+          else   
+              return "invalid credentials";
+        } ))
+  }*/
 });
 
 
@@ -202,3 +271,9 @@ server.get('/api/validCredentials/:user', async function(req, res, next){
 http.createServer(server).listen(server.get('port'), function () {
   console.log("Express server listening on port " + server.get('port'));
 });
+
+// http://stackoverflow.com/questions/46155/validate-email-address-in-javascript
+function validateEmail(email) {
+    var re = /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+    return re.test(email);
+}

@@ -13,19 +13,30 @@ export class App extends React.Component {
     super();
     this.state = {
       page: 'home',
+      login: api.getLoginValues()
     };
+    console.log("loginValue : "+JSON.stringify(this.state.login));
+  }
+
+  requireAuth(nextState, replaceState) {
+    if (!this.state.login)
+        browserHistory.push('/login')
+//    if (!this.state.login)
+//      replaceState({ nextPathname: nextState.location.pathname }, '/login')
+  }
+  redirectToHomeIfLogged(nextState, replaceState){
+    if( this.state.login )
+      browserHistory.push('/');
   }
 
   render() {
     var router = (
-      <Router history={browserHistory}>
-        <Route path="/" component={Home} />
-        <Route path="/timeline/:userId" component={UserTimeline} />
-        <Route path="/login" component={Login} />
-      </Router>
-    );
-    if ( ! api.isTokenAuth() )
-      router.transitionTo('login');
+        <Router history={browserHistory}>
+          <Route path="/" component={Home} onEnter={this.requireAuth.bind(this)}/>
+          <Route path="/timeline/:userId" component={UserTimeline} onEnter={this.requireAuth.bind(this)}/>
+          <Route path="/login" component={Login} onEnter={this.redirectToHomeIfLogged.bind(this)}/>
+        </Router>
+      )
     return router;
   }
 
