@@ -34,7 +34,6 @@ antidote.defaultBucket = "chirps";
 // global set of all user ids
 let userSet = antidote.set("users")
 let user2pass = antidote.map("user2pass")
-let user2mail = antidote.map("user2mail")
 
 // each user has a timeline with the Chirps he can read
 let timeline = (user) => antidote.set(`timeline_${user}`);
@@ -46,9 +45,8 @@ let timeline = (user) => antidote.set(`timeline_${user}`);
  *  -> userSet = antidote.set("users") 
  *    made of records of the type :
  *      { 
- *        userID: <unique identifier: <number>_user>,
- *        name: <user\' name>,    
- *        password: <password>,
+ *        time: <registration's timestamp>,
+ *        user: <user\' name>,    
  *        email: <email>
  *      }
  */
@@ -65,9 +63,8 @@ antidote.update(userSet.add('Donald'))
 antidote.update(
   [
     user2pass.register('Donald').set('passwd'),
-    user2mail.register('Donald').set('donald@mail.com'),    
   ])
-    .then(_=>console.log('Inserted entry Donald,passwd,donald@mail.com'))
+    .then(_=>console.log('Inserted entry Donald,passwd'))
     .catch(err => console.log('Could not insert user2pass or user2mail'))
 
 
@@ -104,16 +101,32 @@ function handle(handler) {
 function handleWithRes(handler) {
   return (req, res, next) => {
     handler(req,res)
-      .then(r => res.send(r))
       .catch(next)
   };  
+}
+function assertOrThrow(condition,code, msg, e=undefined) {
+  if ( condition ) 
+    throw {status:code, mesg :msg, rawError:e}
+}
+function catchHandler(code, msg){ return (e) => assertOrThrow(true, code, msg, e) }
+function sendAndNotifyError(res, e){
+  console.error(e)
+  if ( e.stack )
+    console.error("STACK TRACE :" + e.stack) 
+  if (e.rawError ) console.error(e.rawError)     
+  return res
+    .status(e.status?e.status:500)
+    .send(e.mesg ? e.mesg : "");
 }
 
 /**
  * Gives a list of all user-names in the system
  */
 server.get('/api/users', handle(async req => {
-  return await userSet.read();
+  return await userSet.read().then( 
+    us => user2pass.read().then( ps => 
+      "userSet "+us.map(i=>JSON.stringify(i))+" <br/>user2pass "+JSON.stringify(ps.toJsObject())
+  ))
 }));
 
 /**
@@ -142,7 +155,7 @@ server.post('/api/chirps', handle(async req => {
     console.log("Warning: No users found to see the new chirp.")
   } else {
     await antidote.update(
-      users.map(u => timeline(u).add(chirp))
+      users.map(u => timeline(u.user).add(chirp))
     );
   }
   return chirp;
@@ -208,49 +221,31 @@ server.post('/api/register/', handleWithRes( async (req, res) => {
     let data = req.body
     let user = data.user;
     let password = data.password;
-    let mail = data.mail;
-
+    let email = data.mail;
     let a_user = { 
-      userID: Date.now()+user,
+      time: Date.now(),
       name: user,    
-      password: password,
       email: email
     }
-    // validation
-    var err = undefined;
-    if ( !user || !password || !mail ) 
-      err = {status:406, mesg :"Empty values"};
-//    req.assert(mail, {status:406, mesg :'valid email required'}).isEmail();
-
-    if ( err )
-      return res
-          .status(e.status?e.status:500)
-          .send(e.mesg ? e.mesg : e);
-
-    // 
-    console.log("starting to register "+JSON.stringify(data) );
     try{
-        /*
-        let users = await tx.set('users').read()
-          .catch(e=>{throw {status:500, mesg :"Failled to read users"}});
-        if ( user in users )
-          throw {status:400, mesg :"User already registred"};
-          */ // no es atomic. 
-        await antidote.update([
-              userSet.add(user),
-              user2pass.register(user).set(password),
-              user2mail.register(user).set(mail)    
-        ])
-        .then(_=>{res.status(201).send(JSON.stringify({user:user}))})
-        .catch(e=>{throw {status:500, mesg :"Failled to add user"}})
-    }catch( e ){
-        res
-          .status(e.status?e.status:500)
-          .send(e.mesg ? e.mesg : e);
-        console.error(e)
-        if ( e.stack )
-          console.error("STACK TRACE :" + e.stack)
-    }
+      // validation
+      assertOrThrow(!user || !password || !email, 406, "Empty values" )
+
+      // start transaction
+      let tx = await antidote.startTransaction().catch(catchHandler(500, "startTransaction"))
+      let u2p = await tx.map('user2pass')
+      let storedPasswd = await u2p.register(user).read()
+            .catch(catchHandler(500, "Failled to read stored password"))
+      assertOrThrow(storedPasswd && storedPasswd!="", 406, "User already registered" )
+      let u_set = await tx.set('users')
+      await tx.update( u_set.add(a_user) ).catch(catchHandler(500,"update user set failled"))
+      let users = await u_set.read().catch(catchHandler(500, "read user set failled"))
+      let olderUsers = users.filter(s=>(s.user && a_user.user == s.user && s.time && a_user.time > s.time)) 
+      assertOrThrow( olderUsers && olderUsers.length > 0 , 406, "This user was already registered")
+      await tx.update( u2p.register(user).set(password) ).catch(catchHandler(500,"update"))
+      await tx.commit().catch(catchHandler(500, "commit"))
+      return res.status(201).send({user:user})
+    }catch( e ){ return sendAndNotifyError(res,e)}
 } ) )
 
 /**
@@ -260,24 +255,13 @@ server.post('/api/validCredentials/', handleWithRes(async (req, res) => {
   let credentials = req.body
   let user = credentials.user;
   let password = credentials.password;
-  if ( !user || !password ) 
-    res.status(401).send("empty credentials")
-  (antidote
-    .map("user2pass")
-    .register(user)
-    .read()
-      .then( storedPasswd => {
-        if ( storedPasswd == password )
-          res.send(JSON.stringify({user:user}));
-        else   
-            res.status(403).send("invalid credentials");
-      } )
-      .catch(e=>{
-          res
-            .status(401)
-            .send("bad login " + e)
-          console.log(e);
-      }))
+  try{
+    //validation 
+    assertOrThrow(!user || !password, 401, "Empty credentials" )
+    let readPass = await user2pass.register(user).read().catch(catchHandler(403,"User not found"))
+    assertOrThrow( readPass != password , 403, "Invalid credentials" )
+    return res.status(200).send({user:user})
+  }catch( e ){ return sendAndNotifyError(res,e)}
 }));
 
 

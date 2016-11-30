@@ -1,4 +1,4 @@
-import * as axios from 'axios'
+import * as axios from 'axios';
 import cookie from 'react-cookie';
 
 export function removeLoginValues(){
@@ -18,6 +18,21 @@ export function getLoginValues( ){
 	return undefined;
 }
 
+export async function getRegistration(args){
+	let response = await axios.post('/api/register/', args)
+		.catch(e=>e.response);
+	if ( response.status != 201 )
+		throw "Error registrating "+response.status+" with data "+response.data;
+	return response.body;
+}
+
+export async function getAuthentification(args) {
+	let response = await axios.post('/api/validCredentials/', args)
+		.catch(e=>e.response);
+	if ( response.status != 200 )
+    	throw "Error loggin "+response.status+" with data "+response.data;
+	return response.body;
+}
 
 export async function getTimeline() {
 	let response = await axios.get('/api/timeline');
