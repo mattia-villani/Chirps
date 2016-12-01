@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Header } from './header';
 import { Chirps } from './chirps';
+import { TopBar } from './topBar';
 import * as api from '../models/chirps'
 import { Router, Route, Link, browserHistory } from 'react-router';
 
@@ -46,11 +47,6 @@ export class Home extends React.Component {
 
   render() {
     let body;
-    var statusBar = (
-        <div>
-          <button onClick={this.logout.bind(this)}>logout</button>
-        </div>
-      );
 
     if (this.state.status == 'ready') {
       let chirps = this.state.newChirps.concat(this.state.chirps);
@@ -66,7 +62,7 @@ export class Home extends React.Component {
 
     return (
       <div className='app'>
-        {statusBar}
+        {TopBar}
         <Header onChirpAdded={this.addChirp.bind(this)} />
         {body}
       </div>

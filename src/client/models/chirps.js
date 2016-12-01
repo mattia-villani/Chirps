@@ -15,8 +15,10 @@ export function saveLoginValues( obj ){
 export function getLoginValues( ){
 	let user = cookie.load('loginValues_user');
 	let pass = cookie.load('loginValues_password');
-	if ( user && pass )
+	if ( user && pass ){
+		axios.defaults.headers.common['Authorization'] = JSON.stringify({user:user, password:pass});
 		return {user:user, password:pass};
+	}
 	return undefined;
 }
 
@@ -30,7 +32,7 @@ export function getRegistration(args){
 }
 
 export function getAuthentification(args) {
-	return axios.post('/api/validCredentials/', args, {auth:{username:args.user, password:args.password}})
+	return axios.post('/api/validCredentials/', args , auth({user:args.user, password:args.password}))
 		.then( response => { 	
 				if ( response.status != 200 )
     				throw "Error loggin "+response.status+" with data "+response.data;
@@ -38,18 +40,22 @@ export function getAuthentification(args) {
  			})
 }
 
-function auth( ){
-	let credentials = getLoginValues();
+function auth( values ){
+	let credentials = values ? values : getLoginValues();
 	var auth ;
 	if ( credentials )
 		auth = {
-			auth: {
-				username: credentials.user,
-				password: credentials.password
+			headers: {
+        		'Authorization': 'Basic ' + 
+					(new Buffer(
+						JSON.stringify({
+							user:credentials.user, 
+							password:credentials.password}
+					)).toString('base64'))
 			}
 		}
 	else auth = {}
-	axios.defaults.headers.common['Authorization'] = auth;
+	return auth
 }
 
 export async function getTimeline() {

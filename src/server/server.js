@@ -72,10 +72,11 @@ antidote.update(
 
 
 async function currentUser(request) {
-  console.error("\n\n"+CircularJSON.stringify(request)+"\n\n")
-  let credentials = request.config.auth
+  assertOrThrow ( !request.headers.authorization.startsWith("Basic "), 400, "Authorization un-readable")
+  let based64 = request.headers.authorization.replace("Basic ","")
+  let credentials = JSON.parse(new Buffer(based64,'base64').toString('ascii'))
   assertOrThrow(!credentials || credentials == {}, 400, "Badly formatted request")
-  let user = credentials.username;
+  let user = credentials.user;
   let password = credentials.password;
   assertOrThrow(! user || ! password, 400, "Invalid request"  )
   return user2pass
@@ -162,13 +163,13 @@ server.post('/api/chirps', handle(async req => {
   // add a timestamp for sorting
   chirp.time = Date.now();
   // store current user
-  chirp.user = await currentUser(req);
+  chirp.user = currentUser(req);
 
-  // get all users 
-  let users = await userSet.read();
+  // get all users following the creator 
+  let users = await followers(chirp.user);
   // add new Chirp to the timeline of every user
   if (users.length == 0) {
-    console.log("Warning: No users found to see the new chirp.")
+    console.log("Warning: No users found to see the new chirp: "+user+" has no followers")
   } else {
     await antidote.update(
       users.map(u => timeline(u.user).add(chirp))
@@ -229,7 +230,13 @@ server.post('/api/clearChirps', handle(async req => {
   );
   return "database cleared\n";
 }));
-
+/**
+ * search user
+ */
+server.get('/api/search/:key', handle(async req => {
+  let key = req.params.key;
+  return (await userSet.read()).filter(u=> u.user.contains(key))
+}));
 /**
  * Manages the follower of a user 
  */
@@ -239,11 +246,21 @@ server.get('/api/followers/:user', handle(async req => {
 }));
 server.post('/api/followers/:user', handle(async req => {
   let user = req.params.user;
-  return await currentUser(req).then( me => followers(me).add(user) );
+  return await currentUser(req)
+      .then( me => 
+          antidote.update([
+            followers(me).add(user),
+            following(user).add(me)
+          ]) );
 }));
 server.delete('/api/followers/:user', handle(async req => {
   let user = req.params.user;
-  return await currentUser(req).then( me => followers(me).remove(user) );
+  return await currentUser(req)
+      .then( me => 
+          antidote.update([
+            followers(me).remove(user),
+            following(user).remove(me)
+          ]) );
 }));
 
 /**
