@@ -30,7 +30,7 @@ export const Login = withRouter(
                 return true;
             })
             .catch(err => {
-                api.saveLoginValues(null);
+                api.saveLoginValues(undefined);
                 var errMsg = (typeof err === 'string') ? err : (
                     err.response ? ("E_"+err.response.status+": "+err.response.data) : "Error"
                 )

@@ -8,6 +8,7 @@ let errorhandler = require('errorhandler');
 let morgan = require('morgan');
 let bodyParser = require('body-parser');
 let validator = require('validator');
+let CircularJSON = require('circular-json')
 
 let server = express();
 
@@ -71,18 +72,21 @@ antidote.update(
 
 
 async function currentUser(request) {
-  let credentials = request.body
-  let user = credentials.user;
+  console.error("\n\n"+CircularJSON.stringify(request)+"\n\n")
+  let credentials = request.config.auth
+  assertOrThrow(!credentials || credentials == {}, 400, "Badly formatted request")
+  let user = credentials.username;
   let password = credentials.password;
-  try{
-    //validation 
-    assertOrThrow( validator.isEmpty(user+""), 401, "user not defined" )
-    assertOrThrow( validator.isEmpty(password+""), 401, "mail not defined" )
-
-    let readPass = await user2pass.register(user).read().catch(catchHandler(403,"User not found"))
-    assertOrThrow( readPass != password , 403, "Invalid credentials" )
-    return user;
-  }catch( e ){ throw e; }
+  assertOrThrow(! user || ! password, 400, "Invalid request"  )
+  return user2pass
+          .register(user)
+          .read()
+          .catch(e => {assertOrThrow(true, 500, "Unable to read user "+user)} )
+          .then( readPass => { 
+            if ( readPass != password ) assertOrThrow(true, 403, "Invalid credentials")
+            console.log("User "+JSON.stringify(user));
+            return user;
+          } )
 }
 
 
@@ -158,7 +162,7 @@ server.post('/api/chirps', handle(async req => {
   // add a timestamp for sorting
   chirp.time = Date.now();
   // store current user
-  chirp.user = currentUser(req);
+  chirp.user = await currentUser(req);
 
   // get all users 
   let users = await userSet.read();
@@ -186,7 +190,7 @@ async function getTimeline(user) {
  * Gives the timeline for the current user
  */
 server.get('/api/timeline', handle(async req => {
-  return getTimeline(currentUser(req))
+  return await currentUser(req).then( u => getTimeline(u) );
 }));
 
 /**
@@ -235,13 +239,11 @@ server.get('/api/followers/:user', handle(async req => {
 }));
 server.post('/api/followers/:user', handle(async req => {
   let user = req.params.user;
-  let me = currentUser(req);
-  return await followers(me).add(user)
+  return await currentUser(req).then( me => followers(me).add(user) );
 }));
 server.delete('/api/followers/:user', handle(async req => {
   let user = req.params.user;
-  let me = currentUser(req);
-  return await followers(me).remove(user)
+  return await currentUser(req).then( me => followers(me).remove(user) );
 }));
 
 /**
@@ -294,10 +296,9 @@ server.post('/api/register/', handleWithRes( async (req, res) => {
  * check if the credentials are corrected, if not, this fails
  */
 server.post('/api/validCredentials/', handleWithRes(async (req, res) => {
-  try{ 
-    let user = await currentUser(req);
-    return res.status(200).send({user:user})
-  }catch( e ){ return sendAndNotifyError(res,e); }
+    return await currentUser(req)
+      .then(user=>res.status(200).send({user:user}))
+      .catch( e => sendAndNotifyError(res,e) )
 }));
 
 

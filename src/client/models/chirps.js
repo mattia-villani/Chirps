@@ -2,19 +2,21 @@ import * as axios from 'axios';
 import cookie from 'react-cookie';
 
 export function removeLoginValues(){
-	cookie.save(null);
-	cookie.remove('loginValues');
+	cookie.remove('loginValues_user');
+	cookie.remove('loginValues_password');
 }
 export function saveLoginValues( obj ){
-	cookie.save('loginValues', JSON.stringify(obj), {path:'/'});
+	if ( ! obj || obj == null || ! obj.user || ! obj.password ) removeLoginValues();
+	else {
+		cookie.save('loginValues_user', obj.user);
+		cookie.save('loginValues_password', obj.password);
+	}
 }
 export function getLoginValues( ){
-	let vars = cookie.load('loginValues');
-	if ( vars ){ 
-		let parsed = vars;
-		if ( parsed && parsed.user && parsed.password )
-			return parsed;
-	}
+	let user = cookie.load('loginValues_user');
+	let pass = cookie.load('loginValues_password');
+	if ( user && pass )
+		return {user:user, password:pass};
 	return undefined;
 }
 
@@ -28,7 +30,7 @@ export function getRegistration(args){
 }
 
 export function getAuthentification(args) {
-	return axios.post('/api/validCredentials/', args)
+	return axios.post('/api/validCredentials/', args, {auth:{username:args.user, password:args.password}})
 		.then( response => { 	
 				if ( response.status != 200 )
     				throw "Error loggin "+response.status+" with data "+response.data;
@@ -36,26 +38,31 @@ export function getAuthentification(args) {
  			})
 }
 
-function extendsWithCredentials( datos ){
+function auth( ){
 	let credentials = getLoginValues();
-	if ( credentials ){
-		datos.user = credentials.user,
-		datos.password = credentials.password
-	}
-	return datos;
+	var auth ;
+	if ( credentials )
+		auth = {
+			auth: {
+				username: credentials.user,
+				password: credentials.password
+			}
+		}
+	else auth = {}
+	axios.defaults.headers.common['Authorization'] = auth;
 }
 
 export async function getTimeline() {
-	let response = await axios.get('/api/timeline', extendsWithCredentials({}));
+	let response = await axios.get('/api/timeline', auth());
 	return response.data;
 }
 
 export async function getTimelineForUser(user) {
-	let response = await axios.get(`/api/timeline${user}`, extendsWithCredentials({}));
+	let response = await axios.get(`/api/timeline${user}`, auth());
 	return response.data;
 }
 
 export async function saveChirp(chirp) {
-	let res = await axios.post('/api/chirps', extendsWithCredentials(chirp));
+	let res = await axios.post('/api/chirps', chirp, auth());
 	return res.data;
 }
