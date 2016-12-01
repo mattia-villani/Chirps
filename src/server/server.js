@@ -7,7 +7,7 @@ let antidoteClient = require( 'antidote_ts_client');
 let errorhandler = require('errorhandler');
 let morgan = require('morgan');
 let bodyParser = require('body-parser');
-let expressValidator = require('express-validator');
+let validator = require('validator');
 
 let server = express();
 
@@ -16,7 +16,6 @@ let publicDir = path.join(__dirname, '../../public');
 server.set('port', process.env.PORT || 1337);
 server.use(morgan('combined')); // Logger
 server.use(bodyParser.json());
-server.use(expressValidator());
 
 server.use(express.static(publicDir));
 
@@ -37,6 +36,9 @@ let user2pass = antidote.map("user2pass")
 
 // each user has a timeline with the Chirps he can read
 let timeline = (user) => antidote.set(`timeline_${user}`);
+// each user has follower and he follows
+let followers = (user) => antidote.set(`followers_${user}`);
+let following = (user) => antidote.set(`following_${user}`);
 
 
 //------
@@ -68,9 +70,19 @@ antidote.update(
     .catch(err => console.log('Could not insert user2pass or user2mail'))
 
 
-function currentUser(request) {
-  // return fake user
-  return 'Donald';
+async function currentUser(request) {
+  let credentials = request.body
+  let user = credentials.user;
+  let password = credentials.password;
+  try{
+    //validation 
+    assertOrThrow( validator.isEmpty(user+""), 401, "user not defined" )
+    assertOrThrow( validator.isEmpty(password+""), 401, "mail not defined" )
+
+    let readPass = await user2pass.register(user).read().catch(catchHandler(403,"User not found"))
+    assertOrThrow( readPass != password , 403, "Invalid credentials" )
+    return user;
+  }catch( e ){ throw e; }
 }
 
 
@@ -215,6 +227,24 @@ server.post('/api/clearChirps', handle(async req => {
 }));
 
 /**
+ * Manages the follower of a user 
+ */
+server.get('/api/followers/:user', handle(async req => {
+  let user = req.params.user;
+  return await followers(user).read()
+}));
+server.post('/api/followers/:user', handle(async req => {
+  let user = req.params.user;
+  let me = currentUser(req);
+  return await followers(me).add(user)
+}));
+server.delete('/api/followers/:user', handle(async req => {
+  let user = req.params.user;
+  let me = currentUser(req);
+  return await followers(me).remove(user)
+}));
+
+/**
  * Register user to the server
  */
 server.post('/api/register/', handleWithRes( async (req, res) => {
@@ -230,18 +260,30 @@ server.post('/api/register/', handleWithRes( async (req, res) => {
     try{
       // validation
       assertOrThrow(!user || !password || !email, 406, "Empty values" )
+      assertOrThrow( !validator.isEmail(email), 406, "Invalid email" )
+      assertOrThrow( validator.isEmpty(user), 406, "user not defined" )
+      assertOrThrow( !validator.isAlphanumeric(user), 406, "user not alphanumeric" )
+      assertOrThrow( validator.isEmpty(password), 406, "mail not defined" )
 
-      // start transaction
+      // start transaction... What about the abort transaction ? 
       let tx = await antidote.startTransaction().catch(catchHandler(500, "startTransaction"))
       let u2p = await tx.map('user2pass')
       let storedPasswd = await u2p.register(user).read()
             .catch(catchHandler(500, "Failled to read stored password"))
-      assertOrThrow(storedPasswd && storedPasswd!="", 406, "User already registered" )
+      if (storedPasswd && storedPasswd!=""){
+        await tx.commit().catch(catchHandler(500, "abort commit"))
+        assertOrThrow(true, 406, "User already registered");
+      }
       let u_set = await tx.set('users')
       await tx.update( u_set.add(a_user) ).catch(catchHandler(500,"update user set failled"))
       let users = await u_set.read().catch(catchHandler(500, "read user set failled"))
       let olderUsers = users.filter(s=>(s.user && a_user.user == s.user && s.time && a_user.time > s.time)) 
-      assertOrThrow( olderUsers && olderUsers.length > 0 , 406, "This user was already registered")
+      
+      if (olderUsers && olderUsers.length > 0){
+        await tx.update( u_set.remove(a_user) ).catch(catchHandler(500,"update remove user set failled"))
+        await tx.commit().catch(catchHandler(500, "abort commit 2"))
+        assertOrThrow(true, 406, "This user was already registered");
+      }
       await tx.update( u2p.register(user).set(password) ).catch(catchHandler(500,"update"))
       await tx.commit().catch(catchHandler(500, "commit"))
       return res.status(201).send({user:user})
@@ -252,16 +294,10 @@ server.post('/api/register/', handleWithRes( async (req, res) => {
  * check if the credentials are corrected, if not, this fails
  */
 server.post('/api/validCredentials/', handleWithRes(async (req, res) => {
-  let credentials = req.body
-  let user = credentials.user;
-  let password = credentials.password;
-  try{
-    //validation 
-    assertOrThrow(!user || !password, 401, "Empty credentials" )
-    let readPass = await user2pass.register(user).read().catch(catchHandler(403,"User not found"))
-    assertOrThrow( readPass != password , 403, "Invalid credentials" )
+  try{ 
+    let user = await currentUser(req);
     return res.status(200).send({user:user})
-  }catch( e ){ return sendAndNotifyError(res,e)}
+  }catch( e ){ return sendAndNotifyError(res,e); }
 }));
 
 

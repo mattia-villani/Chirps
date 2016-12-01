@@ -41,6 +41,23 @@ body {
   margin: 0;
 }
 
+.header h2 {
+  float: left;
+  font-size: 24px;
+  line-height: 24px;
+  text-shadow: 0 -1px 1px rgba(0, 0, 0, 0.6);
+  margin: 0;
+}
+
+.header .error {
+  float: left;
+  font-size: 24px;
+  line-height: 24px;
+  color: red;
+  text-shadow: 0 -1px 1px rgba(0, 0, 0, 0.6);
+  margin: 0;
+}
+
 .header .add-chirp {
   cursor: pointer;
   font-size: 28px;

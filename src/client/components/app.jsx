@@ -2,42 +2,43 @@ import * as React from 'react';
 import { Header } from './header';
 import { Chirps } from './chirps';
 import { Home } from './home';
-import { Login } from './login';
-import { UserTimeline } from './userTimeline'
+import { Login } from './Login';
+import { UserTimeline } from './userTimeline';
 import { Router, Route, Link, browserHistory } from 'react-router'
-import * as api from '../models/chirps'
+import * as api from '../models/chirps';
+
 
 export class App extends React.Component {
-
   constructor() {
     super();
     this.state = {
-      page: 'home',
-      login: api.getLoginValues()
+      page: 'home'
     };
-    console.log("loginValue : "+JSON.stringify(this.state.login));
   }
 
+  gotoPageIfCondition( condition, page, nextState, replaceState ){
+    if ( condition )
+      replaceState({
+            pathname: page,
+            state: { nextPathname: nextState.location.pathname }
+          })
+
+  }
   requireAuth(nextState, replaceState) {
-    if (!this.state.login)
-        browserHistory.push('/login')
-//    if (!this.state.login)
-//      replaceState({ nextPathname: nextState.location.pathname }, '/login')
+    this.gotoPageIfCondition( !api.getLoginValues(), '/login', nextState, replaceState )  
   }
   redirectToHomeIfLogged(nextState, replaceState){
-    if( this.state.login )
-      browserHistory.push('/');
+    this.gotoPageIfCondition(  api.getLoginValues(), '/', nextState, replaceState )  
   }
+
 
   render() {
-    var router = (
-        <Router history={browserHistory}>
-          <Route path="/" component={Home} onEnter={this.requireAuth.bind(this)}/>
-          <Route path="/timeline/:userId" component={UserTimeline} onEnter={this.requireAuth.bind(this)}/>
-          <Route path="/login" component={Login} onEnter={this.redirectToHomeIfLogged.bind(this)}/>
-        </Router>
-      )
-    return router;
+    return (
+      <Router history={browserHistory}>
+        <Route path="/" component={Home} onEnter={this.requireAuth.bind(this)}/>
+        <Route path="/timeline/:userId" component={UserTimeline} onEnter={this.requireAuth.bind(this)}/>
+        <Route path="login" component={Login} onEnter={this.redirectToHomeIfLogged.bind(this)} />
+      </Router>
+    );
   }
-
 }
