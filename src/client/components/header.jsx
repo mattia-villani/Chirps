@@ -1,5 +1,8 @@
 import * as React from 'react';
 import { AddChirp } from './add_chirp';
+import { SearchUser } from './searchUser';
+import * as api from '../models/chirps'
+import { Router, Route, Link, browserHistory } from 'react-router';
 
 
 export class Header extends React.Component {
@@ -7,9 +10,11 @@ export class Header extends React.Component {
   constructor() {
     super();
     this.state = {
-      addChirpShown: false
+      addChirpShown: false,
+      my_user: api.getLoginValues().user
     };
   }
+
 
   showAddChirp() {
     this.setState({ addChirpShown: true });
@@ -20,18 +25,69 @@ export class Header extends React.Component {
     this.setState({ addChirpShown: false });
   }
 
+  async unfollow(){
+    await api.setFollow( false, this.props.displayedUser )
+    this.props.notifyChange();
+  }
+  async follow(){
+    await api.setFollow( true, this.props.displayedUser )
+    this.props.notifyChange();
+  }
+
+  goToHome(){ 
+    this.props.onLoadTimeline();   
+  }
+
+  logout(){
+    api.removeLoginValues();
+    browserHistory.push('/login');
+  }
+
   render() {
-    let addChirp = undefined;
+    var addChirp = undefined;
+    var searchUser = undefined;
+    var followedStatus = undefined;
+    var followButton = undefined;
+    var goToHomeButton = undefined;
+    var plusButton = undefined;
+
+    console.log("Header props "+JSON.stringify(this.props) )
+
 
     if (this.state.addChirpShown) {
       addChirp = <AddChirp onChirpAdded={this.onChirpAdded.bind(this)} />;
     }
 
+    if ( this.props.iAmFollowed === false || this.props.iAmFollowed == "false" )
+      followedStatus = (<div className="relation">not following you</div>)
+    else if ( this.props.iAmFollowed === true || this.props.iAmFollowed == "true" )
+      followedStatus = (<div className="relation">following you</div>)
+
+
+    if ( this.props.displayedUser != this.state.my_user ){
+      goToHomeButton = (<div className='button' onClick={this.goToHome.bind(this)}>{this.state.my_user}</div>)
+      if ( this.props.iAmFollowing === false || this.props.iAmFollowing == "false" )
+        followButton = (<div className='button' onClick={this.follow.bind(this)}>Follow</div>)
+      else if ( this.props.iAmFollowing === true || this.props.iAmFollowing == "true" )
+        followButton = (<div className='button' onClick={this.unfollow.bind(this)}>Unfollow</div>)
+    }else{
+      searchUser = (<SearchUser onSearchUser={this.props.onSearchUser}/>);
+      plusButton = (<div className='add-chirp' onClick={this.showAddChirp.bind(this)}>+</div>);
+    }
+
+
     return (
       <header>
+        <div className='topBar'>
+          {searchUser}
+          {followedStatus}
+          {followButton}
+          {goToHomeButton}
+          <div className='button' onClick={this.logout.bind(this)}>Logout</div>          
+        </div>
         <div className='header'>
-          <h1>Chirps</h1>
-          <div className='add-chirp' onClick={this.showAddChirp.bind(this)}>+</div>
+          <h1>{this.props.textToShow}</h1>
+          {plusButton}
         </div>
         {addChirp}
       </header>

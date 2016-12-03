@@ -9,7 +9,10 @@ export function ChirpItem(props) {
 
   return (
     <li>
-      <div className='avatar' style={style}></div>
+      <div className='avatar' 
+        style={style}
+        onClick={(ev)=>props.onLoadTimeline(chirp.user)}
+      >{chirp.user}</div>
       <div className='message'>{chirp.message}</div>
     </li>
   );

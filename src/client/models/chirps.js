@@ -39,7 +39,10 @@ export function getAuthentification(args) {
 				return response.body;
  			})
 }
-
+function mirror( something ){
+	console.log( JSON.stringify(something) )
+	return something;
+}
 function auth( values ){
 	let credentials = values ? values : getLoginValues();
 	var auth ;
@@ -64,11 +67,28 @@ export async function getTimeline() {
 }
 
 export async function getTimelineForUser(user) {
-	let response = await axios.get(`/api/timeline${user}`, auth());
+	let response = await axios.get(`/api/timeline/${user}`, auth());
 	return response.data;
 }
 
 export async function saveChirp(chirp) {
 	let res = await axios.post('/api/chirps', chirp, auth());
 	return res.data;
+}
+
+export function getUsersByKey( key ){
+	return axios.get(`/api/search/${key}`, auth())
+		.then( response => response.data )
+}
+
+export function setFollow( following , who ){
+	if ( following )
+		return mirror(axios.put('/api/followers/'+who, {},auth() ))
+	else 
+		return mirror(axios.delete('/api/followers/'+who, auth() ))	
+}
+
+export function getRelation(user){
+	return axios.get('/api/relation/'+user,auth())
+		.then( response => mirror(response.data) )
 }
