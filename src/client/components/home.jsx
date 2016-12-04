@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Header } from './header';
 import { Chirps } from './chirps';
 import { OtherUsers } from './otherUsers';
+import { Replays } from './replays';
 import * as api from '../models/chirps'
 import { Router, Route, Link, browserHistory } from 'react-router';
 
@@ -17,17 +18,21 @@ export class Home extends React.Component {
   async loadChirps( ofWhose = undefined ) {
     let me = api.getLoginValues().user;
     try {
-      this.state = {
+      let state = {
         status: 'loading',
         chirps: [],
         newChirps: [],
+        // values to see another user page
         me: me,
         seeingTimelineOf: ofWhose?ofWhose:me,
         userViews : undefined,
         it_is_followed_by_me: undefined,
         it_is_following_me: undefined,
-        searching: false
+        searching: false,
+        // values to see a single post and the replays
+        seeingAtSinglePost: undefined,
       }
+      if ( this.state ) this.setState(state); else this.state=state;
 
       var chirps = undefined;
       var relation = undefined;
@@ -73,7 +78,7 @@ export class Home extends React.Component {
   }
 
   async addChirp(chirp) {
-    await api.saveChirp(chirp);
+    chirp.id = (await api.saveChirp(chirp)).id;
     // add chirp to current list of chirps
     this.setState({
       newChirps: [chirp].concat(this.state.newChirps)
@@ -88,21 +93,41 @@ export class Home extends React.Component {
     } else this.setState(   {userViews:undefined, searching:false}   )
   }
 
+  async onLoadTopic(chirp){
+    let id = chirp.id ? chirp.id : (chirp.user+chirp.time);
+    chirp.id = id;
+    this.setState({
+      seeingAtSinglePost: chirp,
+    })
+  }
+
+  async hideSinglePost(ev){
+    //ev.preventDefault();
+    this.setState({seeingAtSinglePost:undefined})
+  }
+
   render() {
     let body;
 
     if (this.state.status == 'ready') {
-      if ( this.state.userViews === undefined ){
+      if ( this.state.userViews !== undefined )
+        body = <OtherUsers 
+                    users={this.state.userViews} 
+                    onLoadTimeline={this.loadChirps.bind(this)}
+                  />
+      else if ( this.state.seeingAtSinglePost !== undefined )
+        body = <Replays 
+                  post={this.state.seeingAtSinglePost}
+                  onLoadTimeline={this.loadChirps.bind(this)}
+                  />
+      else{
         let chirps = this.state.newChirps.concat(this.state.chirps);
         body = <Chirps 
                   chirps={chirps} 
                   onLoadTimeline={this.loadChirps.bind(this)}
+                  onLoadTopic={this.onLoadTopic.bind(this)}
                 />
-      } else 
-        body = <OtherUsers 
-                  users={this.state.userViews} 
-                  onLoadTimeline={this.loadChirps.bind(this)}
-                />
+      } 
     } else if (this.state.status == 'loading') {
       body = <div>Loading ...</div>;
     } else if (this.state.status == 'failed') {
@@ -115,14 +140,19 @@ export class Home extends React.Component {
     return (
       <div className='app'>
         <Header 
+            showAddChirpButton={ this.state.seeingTimelineOf == this.state.me && !this.state.seeingAtSinglePost && !this.state.userViews }
             onChirpAdded={this.addChirp.bind(this)} 
+            
             onSearchUser={this.onSearchUser.bind(this)}
             iAmFollowing={this.state.it_is_followed_by_me}
             iAmFollowed={this.state.it_is_following_me}
             displayedUser={this.state.seeingTimelineOf}
             notifyChange={this.reloadRelation.bind(this)}
             onLoadTimeline={this.loadChirps.bind(this)}
-            textToShow={this.state.searching?"searching":(this.state.seeingTimelineOf+"'s Chirps")}/>
+            onBackButton={this.state.seeingAtSinglePost ? this.hideSinglePost.bind(this) : undefined}
+            textToShow={
+              this.state.seeingAtSinglePost ? "Replay"
+              :(this.state.searching?"searching":(this.state.seeingTimelineOf+"'s Chirps"))}/>
         {body}
       </div>
     );

@@ -92,3 +92,14 @@ export function getRelation(user){
 	return axios.get('/api/relation/'+user,auth())
 		.then( response => mirror(response.data) )
 }
+
+export function getReplays ( chirp ){
+	let id = chirp.id ? chirp.id : (chirp.user+chirp.time)
+	return mirror(axios.get('/api/replays/'+id, auth())
+		.then( reponse => reponse.data ))
+}
+
+export function postReplay( replay ){
+	return axios.post('/api/replays', replay, auth())
+		.then( reponse => reponse.data )
+}

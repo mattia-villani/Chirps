@@ -38,10 +38,60 @@ let user2pass = antidote.map("user2pass")
 
 // each user has a timeline with the Chirps he can read
 let timeline = (user) => antidote.set(`timeline_${user}`);
+// each user has a timeline of chirps he wrote
+let written = (user) => antidote.set(`written_${user}`);
 // each user has follower and he follows
 let followers = (user) => antidote.set(`followers_${user}`);
 let following = (user) => antidote.set(`following_${user}`);
+let replays = (chirpSID) => antidote.set('replays_'+chirpSID);
 
+
+// this maps contains the values U->X where X = true <=> U is too expensive. X is undefined otherwise
+let tooExpensiveUsers = antidote.map('tooExpensiveUsers'); 
+let isUserTooExpensive = async (user) => ( await tooExpensiveUsers.register(user).read() ) != undefined;
+let numberOfFollowersBeforeBeingConsideredExpensive = 2;
+
+async function addFollowerToUser(user, follower){
+  antidote.startTransaction()
+    .then( async tx => {
+      let f_ers = await tx.set('followers_'+user)
+      let f_ing = await tx.set('following_'+follower)
+      tx.update([
+        f_ers.add(follower),
+        f_ing.add(user)
+      ]).catch( e => { tx.commit(); throw e; })
+      return f_ers.read().then( async flls => {
+        if ( flls.length && flls.length && flls.length >= numberOfFollowersBeforeBeingConsideredExpensive ){
+          let too = await tx.map('tooExpensiveUsers');          
+          tx.update(too.register(user).set(true))
+            .then( _ => tx.commit())
+            .catch( e => {console.error("Failled to update transaction"); return tx.commit()})
+        }else return tx.commit();
+      })
+      .catch( e => { tx.commit(); throw e; })
+    })
+}
+
+async function removeFollowerToUser(user, follower){
+  antidote.startTransaction()
+    .then( async tx => {
+      let f_ers = await tx.set('followers_'+user)
+      let f_ing = await tx.set('following_'+follower)
+      tx.update([
+        f_ers.remove(follower),
+        f_ing.remove(user)
+      ]).catch( e => { tx.commit(); throw e; })
+      return f_ers.read().then( async flls => {
+        if ( flls.length && flls.length && flls.length < numberOfFollowersBeforeBeingConsideredExpensive ){
+          let too = await tx.map('tooExpensiveUsers');          
+          tx.update(too.register(user).set(undefined))
+            .then( _ => tx.commit())
+            .catch( e => {console.error("Failled to update transaction"); return tx.commit()})
+        }else return tx.commit();
+      })
+      .catch( e => { tx.commit(); throw e; })
+    })
+}
 
 //-----
 // utilitis over antidotes
@@ -212,6 +262,8 @@ server.post('/api/chirps', handle(async req => {
   // store current user
   let cur_user = await currentUser(req);
   chirp.user = cur_user;
+  // id 
+  chirp.id = cur_user+chirp.time
   console.log("Adding chirp "+JSON.stringify(chirp))
 
   // get all users following the creator 
@@ -232,12 +284,26 @@ server.post('/api/chirps', handle(async req => {
  */
 async function getTimeline(user) {
   let chirps = await timeline(user).read();
+
+  let followed = await following(user).read();
+  followed.map( async u => { 
+    if ( isUserTooExpensive(u) )
+      chirps = chiprs.concat(await written(u)) 
+  })
+  
   if ( chirps && chirps.length > 0 )
     chirps.sort((x, y) => y.time - x.time);
   else chirps = []
   return chirps;
 }
-
+/**
+ * fetches the replays of a chirps
+ */
+function getReplays(chirpSID){
+  return replays(chirpSID)
+    .read()
+    .then( replays => { replays.sort((x, y) => x.time - y.time); return replays; })
+}
 /**
  * Gives the timeline for the current user
  */
@@ -250,7 +316,11 @@ server.get('/api/timeline', handle(async req => {
  */
 server.get('/api/timeline/:user', handle(async req => {
   let user = req.params.user;
-  return getTimeline(user)
+  return await written(user).read().then(cs => {
+    if ( cs && cs.length > 0 ) cs.sort((x,y) => y.time - x.time)
+    else cs = []
+    return cs
+  })
 }));
 
 // function to delete everything (for demos and debugging)
@@ -332,21 +402,12 @@ server.put('/api/followers/:user', handle(async req => {
             if ( users.indexOf(user) != -1 ) 
               return currentUser(req); 
             throw "User "+req.params.user+" unknown in collection "+users; 
-      } ).then( me => 
-          antidote.update([
-            followers(user).add(me),
-            following(me).add(user)
-          ])
-      )
+      } ).then( me =>addFollowerToUser(req.params.user, me ) )
 }));
 server.delete('/api/followers/:user', handle(async req => {
   let user = req.params.user;
   return await currentUser(req)
-      .then( me => 
-          antidote.update([
-            followers(user).remove(me),
-            following(me).remove(user)
-          ]) );
+      .then( me => removeFollowerToUser(req.params.user, me ) );
 }));
 
 /**
@@ -370,6 +431,17 @@ server.post('/api/validCredentials/', handleWithRes(async (req, res) => {
       .then(user=>res.status(200).send({user:user}))
       .catch( e => sendAndNotifyError(res,e) )
 }));
+
+server.get('/api/replays/:chirp', handle( async (req) => {
+    return await getReplays(req.params.chirp)
+}))
+server.post('/api/replays', handle( async (req) => {
+    let replay = req.body;
+    replay.time = Date.now()
+    if ( replay.user == await currentUser(req) )
+      return await antidote.update(replays(replay.chirpID).add(replay)).then(_=>replay)
+    else throw "Replay of a different user than the logged one"
+}))
 
 
 // ----- start server -----

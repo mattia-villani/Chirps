@@ -50,21 +50,21 @@ export class Header extends React.Component {
     var followButton = undefined;
     var goToHomeButton = undefined;
     var plusButton = undefined;
+    var backButton = undefined;
 
     console.log("Header props "+JSON.stringify(this.props) )
 
 
     if (this.state.addChirpShown) {
-      addChirp = <AddChirp onChirpAdded={this.onChirpAdded.bind(this)} />;
+      addChirp = <AddChirp onChirpAdded={this.onChirpAdded.bind(this)} user={this.state.my_user} />;
     }
 
-    if ( this.props.iAmFollowed === false || this.props.iAmFollowed == "false" )
+    if ( (this.props.iAmFollowed === false || this.props.iAmFollowed == "false") &&!this.props.onBackButton)
       followedStatus = (<div className="relation">not following you</div>)
-    else if ( this.props.iAmFollowed === true || this.props.iAmFollowed == "true" )
+    else if ( (this.props.iAmFollowed === true || this.props.iAmFollowed == "true") && !this.props.onBackButton )
       followedStatus = (<div className="relation">following you</div>)
 
-
-    if ( this.props.displayedUser != this.state.my_user ){
+    if ( this.props.displayedUser != this.state.my_user &&  ! this.props.onBackButton ){
       goToHomeButton = (<div className='button' onClick={this.goToHome.bind(this)}>{this.state.my_user}</div>)
       if ( this.props.iAmFollowing === false || this.props.iAmFollowing == "false" )
         followButton = (<div className='button' onClick={this.follow.bind(this)}>Follow</div>)
@@ -72,7 +72,11 @@ export class Header extends React.Component {
         followButton = (<div className='button' onClick={this.unfollow.bind(this)}>Unfollow</div>)
     }else{
       searchUser = (<SearchUser onSearchUser={this.props.onSearchUser}/>);
-      plusButton = (<div className='add-chirp' onClick={this.showAddChirp.bind(this)}>+</div>);
+      if ( this.props.showAddChirpButton )
+        plusButton = (<div className='add-chirp' onClick={this.showAddChirp.bind(this)}>+</div>);
+      else if ( this.props.onBackButton !== undefined )
+        backButton = ( <div className='button' onClick={this.props.onBackButton}>Back</div> )
+
     }
 
 
@@ -83,6 +87,7 @@ export class Header extends React.Component {
           {followedStatus}
           {followButton}
           {goToHomeButton}
+          {backButton}
           <div className='button' onClick={this.logout.bind(this)}>Logout</div>          
         </div>
         <div className='header'>

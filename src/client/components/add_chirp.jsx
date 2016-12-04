@@ -1,4 +1,6 @@
 import * as React from 'react';
+import * as api from '../models/chirps'
+
 
 
 function avatar() {
@@ -9,12 +11,13 @@ function avatar() {
 }
 
 export class AddChirp extends React.Component {
-  constructor() {
-    super();
+  constructor(props) {
+    super(props);
     this.state = {
       chirp: {
         avatar: avatar(),
         message: "",
+        user: props.user
       },
       saving: false
     };
