@@ -288,7 +288,7 @@ async function getTimeline(user) {
   let followed = await following(user).read();
   followed.map( async u => { 
     if ( isUserTooExpensive(u) )
-      chirps = chiprs.concat(await written(u)) 
+      chirps = chirps.concat(await written(u)) 
   })
   
   if ( chirps && chirps.length > 0 )

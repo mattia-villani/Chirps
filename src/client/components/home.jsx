@@ -70,11 +70,11 @@ export class Home extends React.Component {
           catch(err =>{ console.log("Error updating relation "+(err.stack?err.stack:err) ); return undefined;} ) 
       ) : undefined;   
     if ( relation ) 
-    this.setState({
-      status: 'ready',
-      it_is_followed_by_me: relation ? relation.it_is_followed_by_me : undefined,
-      it_is_following_me: relation ? relation.it_is_following_me : undefined
-    })
+      this.setState({
+        status: 'ready',
+        it_is_followed_by_me: relation ? relation.it_is_followed_by_me : undefined,
+        it_is_following_me: relation ? relation.it_is_following_me : undefined
+      })
   }
 
   async addChirp(chirp) {

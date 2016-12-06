@@ -26,12 +26,16 @@ export class Header extends React.Component {
   }
 
   async unfollow(){
-    await api.setFollow( false, this.props.displayedUser )
-    this.props.notifyChange();
+    let props = this.props;
+    api.setFollow( false, this.props.displayedUser ).then(_=>
+      props.notifyChange()    
+    )
   }
   async follow(){
-    await api.setFollow( true, this.props.displayedUser )
-    this.props.notifyChange();
+    let props = this.props;
+    api.setFollow( true, this.props.displayedUser ).then(_=>
+      props.notifyChange()    
+    )
   }
 
   goToHome(){ 
