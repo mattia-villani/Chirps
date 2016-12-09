@@ -41,8 +41,8 @@ let timeline = (user) => antidote.set(`timeline_${user}`);
 // each user has a timeline of chirps he wrote
 let written = (user) => antidote.set(`written_${user}`);
 // each user has follower and he follows
-let followers = (user) => antidote.set(`followers_${user}`);
-let following = (user) => antidote.set(`following_${user}`);
+let followers = (user) => antidote.set('followers_'+user);
+let following = (user) => antidote.set('following_'+user);
 let replays = (chirpSID) => antidote.set('replays_'+chirpSID);
 
 
@@ -51,46 +51,49 @@ let tooExpensiveUsers = antidote.map('tooExpensiveUsers');
 let isUserTooExpensive = async (user) => ( await tooExpensiveUsers.register(user).read() ) != undefined;
 let numberOfFollowersBeforeBeingConsideredExpensive = 2;
 
-async function addFollowerToUser(user, follower){
-  antidote.startTransaction()
-    .then( async tx => {
-      let f_ers = await tx.set('followers_'+user)
-      let f_ing = await tx.set('following_'+follower)
-      tx.update([
+function addFollowerToUser(user, follower){
+  return antidote.startTransaction()
+    .then( tx => {
+      let f_ers = tx.set('followers_'+user)
+      let f_ing = tx.set('following_'+follower)
+      return tx.update([
         f_ers.add(follower),
         f_ing.add(user)
-      ]).catch( e => { tx.commit(); throw e; })
-      return f_ers.read().then( async flls => {
-        if ( flls.length && flls.length && flls.length >= numberOfFollowersBeforeBeingConsideredExpensive ){
-          let too = await tx.map('tooExpensiveUsers');          
-          tx.update(too.register(user).set(true))
-            .then( _ => tx.commit())
-            .catch( e => {console.error("Failled to update transaction"); return tx.commit()})
-        }else return tx.commit();
-      })
+      ])
+      .then( _ => f_ers.read() )
+      .then( flls => 
+          ( !flls.length || flls.length < numberOfFollowersBeforeBeingConsideredExpensive) ?
+          tx.commit() :
+          tx.update( tx.map('tooExpensiveUsers').register(user).set(true) )
+                .then( _ => tx.commit())
+      )
       .catch( e => { tx.commit(); throw e; })
     })
 }
 
-async function removeFollowerToUser(user, follower){
-  antidote.startTransaction()
-    .then( async tx => {
-      let f_ers = await tx.set('followers_'+user)
-      let f_ing = await tx.set('following_'+follower)
-      tx.update([
+function removeFollowerToUser(user, follower){
+  return antidote.startTransaction()
+    .then( tx => {
+      let f_ers = tx.set('followers_'+user)
+      let f_ing = tx.set('following_'+follower)
+      
+      return tx.update([
         f_ers.remove(follower),
         f_ing.remove(user)
-      ]).catch( e => { tx.commit(); throw e; })
-      return f_ers.read().then( async flls => {
-        if ( flls.length && flls.length && flls.length < numberOfFollowersBeforeBeingConsideredExpensive ){
-          let too = await tx.map('tooExpensiveUsers');          
-          tx.update(too.register(user).set(undefined))
-            .then( _ => tx.commit())
-            .catch( e => {console.error("Failled to update transaction"); return tx.commit()})
-        }else return tx.commit();
-      })
-      .catch( e => { tx.commit(); throw e; })
+      ])
+      
+      .then( _=> 
+        f_ers.read().then( async flls => {
+          if ( flls.length && flls.length && flls.length < numberOfFollowersBeforeBeingConsideredExpensive ){
+            let too = await tx.map('tooExpensiveUsers');          
+            tx.update(too.register(user).set(undefined))
+          }
+        })
+      )
+      .then( _ => tx.commit() )
+      .catch( e => { tx.commit(); console.error(e.stack ? e.stack : e); throw e; })
     })
+    .catch(e => {console.error("error removing follower "+JSON.stringify(e)); throw e;})
 }
 
 //-----
@@ -227,6 +230,22 @@ server.get('/login', function (req, res, next) {
   res.sendfile('public/index.html');
 });
 
+server.get('/search/', function (req, res, next) {
+  res.sendfile('public/index.html');
+});
+server.get('/search', function (req, res, next) {
+  res.sendfile('public/index.html');
+});
+
+server.get('/replays/*', function (req, res, next) {
+  res.sendfile('public/index.html');
+});
+
+
+server.get('/timeline', function (req, res, next) {
+  res.sendfile('public/index.html');
+});
+
 server.get(/^\/(timeline)\/.*/, function (req, res, next) {
   res.sendfile('public/index.html');
 });
@@ -311,6 +330,27 @@ server.get('/api/timeline', handle(async req => {
   return await currentUser(req).then( u => getTimeline(u) );
 }));
 
+server.get('/api/chirp/:chirpId', handle( async req => {
+  let chirpId = req.params.chirpId
+  let ret = await userSet
+    .read()
+    .then( async (users) => 
+      (await Promise.all( users
+        .filter( u => chirpId.startsWith(u) )
+        .map( async (user) =>
+           // concat just for debug since some chirps in db are not in the written set
+          (await written(user).read())
+            .concat(await getTimeline(user))
+            .filter(chirp => chirp.id==chirpId || chirpId == (chirp.user+chirp.time) )
+        )
+      ))
+      .reduce( (a, b) => (a && a.length > 0) ? a : b )
+      .reduce( ((a,b) => a?a:(b?b:undefined)), undefined )
+    )
+  if ( ! ret ) throw "Chirp unfound"
+  else console.log("Chirp found : "+JSON.stringify(ret))
+  return ret;
+}))
 /**
  * Gives the timeline for a specific user
  */
@@ -374,27 +414,28 @@ server.get('/api/search/:key', handle(async req => {
 /**
  * tells if the user is following and it is followed by the params
  */
+async function getRelation( me, user, f_ers = undefined, f_ing = undefined ){
+  let relation = { 
+        it_is_followed_by_me: 
+          await (f_ers?f_ers:followers(user)).read().then( followersOfUser => ( followersOfUser.indexOf(me)!=-1 ) ),
+        it_is_following_me: 
+          await (f_ing?f_ing:following(user)).read().then( userIsFollowing => ( userIsFollowing.indexOf(me)!=-1 ) )
+    }
+  console.log("Relation between "+user+" and me "+me+": "+JSON.stringify(relation) )
+  return relation
+}
+
 server.get('/api/relation/:user', handleWithRes(async (req, res) => {
     try{
       let user = req.params.user;
       let me = await currentUser(req);
-      let relation = { 
-        it_is_followed_by_me: 
-          await followers(user).read().then( followersOfUser => ( followersOfUser.indexOf(me)!=-1 ) ),
-        it_is_following_me: 
-          await following(user).read().then( userIsFollowing => ( userIsFollowing.indexOf(me)!=-1 ) )
-      }
-      console.log("Relation with "+user+": "+JSON.stringify(relation) )
+      let relation = await getRelation(me, user);
       return res.status(200).send( relation )
     }catch(e){ return sendAndNotifyError(res,e); }
 }));
 /**
  * Manages the follower of a user 
  */
-server.get('/api/followers/:user', handle(async req => {
-  let user = req.params.user;
-  return await followers(user).read()
-}));
 server.put('/api/followers/:user', handle(async req => {
   let user = req.params.user;
   return await userSet.read()
@@ -402,12 +443,15 @@ server.put('/api/followers/:user', handle(async req => {
             if ( users.indexOf(user) != -1 ) 
               return currentUser(req); 
             throw "User "+req.params.user+" unknown in collection "+users; 
-      } ).then( me =>addFollowerToUser(req.params.user, me ) )
+      } )
+      .then( me =>addFollowerToUser(req.params.user, me ).then( _ => getRelation(me,user)) )
+      .catch(e => {console.error("del_err "+e);throw e;})
 }));
 server.delete('/api/followers/:user', handle(async req => {
   let user = req.params.user;
   return await currentUser(req)
-      .then( me => removeFollowerToUser(req.params.user, me ) );
+      .then( me => removeFollowerToUser( req.params.user, me ).then( _ => getRelation(me,user)) )
+      .catch(e => {console.error("del_err "+e);throw e;})
 }));
 
 /**

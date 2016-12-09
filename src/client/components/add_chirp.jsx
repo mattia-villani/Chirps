@@ -31,7 +31,7 @@ export class AddChirp extends React.Component {
       this.setState({saving: true, error: undefined})
       var chirp = this.state.chirp;
       await this.props.onChirpAdded(chirp);
-      this.setState({saving: false})
+      //this.setState({saving: false})
     } catch (e) {
       console.log("add_chirps error", e)
       this.setState({

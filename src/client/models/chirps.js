@@ -66,9 +66,14 @@ export async function getTimeline() {
 	return response.data;
 }
 
-export async function getTimelineForUser(user) {
-	let response = await axios.get(`/api/timeline/${user}`, auth());
-	return response.data;
+export function getTimelineForUser(user) {
+	return axios.get(`/api/timeline/${user}`, auth())
+		.then ( response => mirror(response.data) );
+}
+
+export function getChripById( chirpId ){
+	return axios.get('/api/chirp/'+chirpId, auth())
+		.then ( response => mirror(response.data) )
 }
 
 export async function saveChirp(chirp) {
@@ -83,9 +88,9 @@ export function getUsersByKey( key ){
 
 export function setFollow( following , who ){
 	if ( following )
-		return mirror(axios.put('/api/followers/'+who, {},auth() ))
+		return axios.put('/api/followers/'+who, {},auth() ).then(response=>mirror(response.data))
 	else 
-		return mirror(axios.delete('/api/followers/'+who, auth() ))	
+		return axios.delete('/api/followers/'+who, auth() ).then(response=>mirror(response.data))	
 }
 
 export function getRelation(user){
@@ -93,10 +98,9 @@ export function getRelation(user){
 		.then( response => mirror(response.data) )
 }
 
-export function getReplays ( chirp ){
-	let id = chirp.id ? chirp.id : (chirp.user+chirp.time)
-	return mirror(axios.get('/api/replays/'+id, auth())
-		.then( reponse => reponse.data ))
+export function getReplays ( chirpId ){
+	return mirror(axios.get('/api/replays/'+chirpId, auth())
+		.then( response => response.data ))
 }
 
 export function postReplay( replay ){

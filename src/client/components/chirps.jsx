@@ -6,8 +6,10 @@ export function Chirps(props) {
     return <div>Loading...</div>;
   } else {
     let chirps = props.chirps.map(function (chirp, i) {
-      return <ChirpItem key={i} chirp={chirp}  onLoadTimeline={props.onLoadTimeline} onLoadTopic={props.onLoadTopic}
-/>
+      return <ChirpItem 
+              key={chirp.id ? chirp.id : chirp.user+chirp.time} 
+              chirp={chirp}  
+          />
     });
     if ( chirps && chirps.length > 0 )
       return (<ul className='chirp-list' >{chirps}</ul>);
