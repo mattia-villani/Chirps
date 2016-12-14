@@ -70,6 +70,7 @@ export class Home extends React.Component {
   async loadChirps() {
     if ( this.state.status != 'loading') this.setState({status:'loading'})
     await api.getTimeline()
+      .then( chirps => { console.log("Loaded "+JSON.stringify(chirps)); return chirps;})
       .then( chirps => this.setState({ status: 'ready', chirps: chirps }))
       .catch( e =>  {
           console.log("Failled to load timeline : "+(e.stack?e.stack:JSON.stringify(e)) )
@@ -78,9 +79,9 @@ export class Home extends React.Component {
   }
 
   async addChirp(chirp) {
-    chirp.id = await api.saveChirp(chirp)
+    var newChirp = await api.saveChirp(chirp)
     // add chirp to current list of chirps
-    this.setState({ newChirps: [chirp].concat(this.state.newChirps) })
+    this.setState({ newChirps: [newChirp].concat(this.state.newChirps) })
   }
 
   render() {

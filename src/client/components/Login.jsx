@@ -25,6 +25,7 @@ export const Login = withRouter(
                 api.saveLoginValues( {
                     user:args.user, 
                     password:args.password,
+                    userId:data.userId
                 });
                 this.setState({sending:false});
                 return true;
@@ -35,12 +36,13 @@ export const Login = withRouter(
                     err.response ? ("E_"+err.response.status+": "+err.response.data) : "Error"
                 )
                 this.setState({error: errMsg, sending:false});
-                console.log('Error ' + JSON.stringify(err));
+                console.log('Error ' + err + " " + JSON.stringify(err) + " " + err.stack);
                 return false;
             })
     },
 
     goToHome(){
+        console.log("redirecting to /")
         const { location } = this.props
         if (location.state && location.state.nextPathname) {
             this.props.router.replace(location.state.nextPathname)

@@ -33,9 +33,9 @@ function Replay(props) {
     <li>
       <div className='message replay' >
         <p className='author' onClick={ev => browserHistory.push('/timeline/'+props.replay.user)}>
-            {props.replay.user}
+            {props.replay.body.user}
         </p>
-        {props.replay.text}
+        {props.replay.body.text}
         </div>
     </li>
   );
@@ -63,11 +63,11 @@ export class Replays extends React.Component {
   async postReplay(){
       this.setState({status: 'loading'})
       let replay = {
-          chirpID: this.state.chirpId,
+          chirpId: this.state.chirpId,
           user: this.state.me,
           text: this.refs.repl.value
       }
-      await api.postReplay(replay)
+      await api.postReplay(replay, this.state.chirpId)
         .then( rep => this.setState({
             status: 'ready', 
             replays: this.state.replays.concat([rep])

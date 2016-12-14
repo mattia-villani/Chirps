@@ -13,7 +13,8 @@ class OtherUserTimeLineHeader extends Header{
     this.state={
       status:'loading',
       relation:undefined,
-      userId: props.userId
+      getUserId: props.getUserId,
+      user:props.user
     }
     this.loadRelation();
   }
@@ -22,8 +23,8 @@ class OtherUserTimeLineHeader extends Header{
     let This = this;
     if ( this.state.status!='loading') this.setState({status:'loading', relation:undefined})
     await ( setFollow===undefined ? 
-                api.getRelation(this.state.userId) :
-                api.setFollow( setFollow, this.state.userId)  
+                api.getRelation(this.state.getUserId()) :
+                api.setFollow( setFollow, this.state.getUserId())  
       ).then( raw => { 
         if ( ! raw || raw.it_is_followed_by_me === undefined || raw.it_is_following_me === undefined )
           throw "Badly formed response "+JSON.stringify(raw);
@@ -72,7 +73,7 @@ class OtherUserTimeLineHeader extends Header{
               <div className='button' onClick={super.logout.bind(this)}>Logout</div>          
           </div>
           <div className='header'>
-              <h1>{this.state.userId}'s chirps</h1>
+              <h1>{this.state.user}'s chirps</h1>
           </div>
       </header>);
   }
@@ -85,21 +86,20 @@ export class UserTimeline extends React.Component {
   constructor(props) {
     super(props);
     
-    const userId = props.params.userId;
-
     this.state = {
       status: 'loading',
-      userId: userId,
+      userId: undefined,
       chirps: []
     }
     this.loadChirps()
   }
 
   async loadChirps() {
-    let This = this;
-    await api.getTimelineForUser(this.state.userId)
-      .then( chirps => This.setState({status:'ready', chirps:chirps}) )
-      .catch( e => This.setState({status:'failed', chirps:[]}))
+    api.getIdOfUser(this.props.params.user)
+      .then( id => this.setState({userId:id}) )
+      .then( _ => api.getTimelineForUser(this.state.userId) )
+      .then( chirps => this.setState({status:'ready', chirps:chirps}) )
+      .catch(_=> this.setState({status:'failed', userId:undefined, chirp:[]}))
   }
 
   render() {
@@ -111,16 +111,17 @@ export class UserTimeline extends React.Component {
               />) //                 onLoadTopic={this.onLoadTopic.bind(this)} 
 
     else if (this.state.status == 'loading') 
-      body = <div>Loading ...</div>;
+      return body = <div>Loading ...</div>;
     else if (this.state.status == 'failed') 
-      body = <div>Could not load messages</div>;
+      return body = <div>Could not load messages</div>;
     else 
       throw new Error();
     
     return (
       <div className='app'>
         <OtherUserTimeLineHeader 
-          userId={this.state.userId} 
+          user={this.props.params.user} 
+          getUserId = {() => this.state.userId }
         />
         {body}
       </div>

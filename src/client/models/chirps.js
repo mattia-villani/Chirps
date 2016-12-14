@@ -1,23 +1,28 @@
 import * as axios from 'axios';
 import cookie from 'react-cookie';
+import { Router, Route, Link, browserHistory } from 'react-router'
 
 export function removeLoginValues(){
 	cookie.remove('loginValues_user');
 	cookie.remove('loginValues_password');
+	cookie.remove('loginValues_userId');
 }
 export function saveLoginValues( obj ){
-	if ( ! obj || obj == null || ! obj.user || ! obj.password ) removeLoginValues();
+	if ( ! obj || obj == null || ! obj.user || ! obj.password || ! obj.userId ) 
+		removeLoginValues();
 	else {
 		cookie.save('loginValues_user', obj.user);
 		cookie.save('loginValues_password', obj.password);
+		cookie.save('loginValues_userId', obj.userId);
 	}
 }
 export function getLoginValues( ){
 	let user = cookie.load('loginValues_user');
 	let pass = cookie.load('loginValues_password');
-	if ( user && pass ){
+	let userId = cookie.load('loginValues_userId');
+	if ( user && pass && userId ){
 		axios.defaults.headers.common['Authorization'] = JSON.stringify({user:user, password:pass});
-		return {user:user, password:pass};
+		return {user:user, password:pass, userId:userId};
 	}
 	return undefined;
 }
@@ -25,18 +30,18 @@ export function getLoginValues( ){
 export function getRegistration(args){
 	return axios.post('/api/register/', args)
 		.then( response => {
-			if ( response.status != 201 )
+			if ( response.status != 200 && response.status != 201 )
 				throw "Error registrating "+response.status+" with data "+response.data;
 			else response.body;
 		})
 }
 
 export function getAuthentification(args) {
-	return axios.post('/api/validCredentials/', args , auth({user:args.user, password:args.password}))
+	return axios.post('/api/login/', args , auth({user:args.user, password:args.password}))
 		.then( response => { 	
 				if ( response.status != 200 )
     				throw "Error loggin "+response.status+" with data "+response.data;
-				return response.body;
+				else return mirror( response.data )
  			})
 }
 function mirror( something ){
@@ -53,7 +58,9 @@ function auth( values ){
 					(new Buffer(
 						JSON.stringify({
 							user:credentials.user, 
-							password:credentials.password}
+							password:credentials.password,
+							userId:credentials.userId
+						}
 					)).toString('base64'))
 			}
 		}
@@ -61,49 +68,57 @@ function auth( values ){
 	return auth
 }
 
-export async function getTimeline() {
-	let response = await axios.get('/api/timeline', auth());
-	return response.data;
+
+function authenticatedRequest(type, path, arg=undefined){
+	return ( 
+			(type=='post'||type=='put') ?
+				axios[type]( path, arg, auth() ):
+				axios[type]( path, auth() )
+		)
+		.catch( e => {
+			if (e.status == 400){ // checking the validity of token
+				console.error("Error authenticating "+ e)
+				removeLoginValues();
+				browserHistory.push('/login');						
+			}else {
+				console.log("error occourred "+e+": "+JSON.stringify(e) )
+				throw e;
+			}
+		})
+		.then( response => {
+			console.log("Request "+type+" to "+path+" with arg "+arg+" -->> "+JSON.stringify(response.data))
+			return response.data;
+		})
 }
 
-export function getTimelineForUser(user) {
-	return axios.get(`/api/timeline/${user}`, auth())
-		.then ( response => mirror(response.data) );
-}
 
-export function getChripById( chirpId ){
-	return axios.get('/api/chirp/'+chirpId, auth())
-		.then ( response => mirror(response.data) )
-}
 
-export async function saveChirp(chirp) {
-	let res = await axios.post('/api/chirps', chirp, auth());
-	return res.data;
-}
+export let getTimeline = () => 
+	authenticatedRequest( 'get', '/api/timeline' );
 
-export function getUsersByKey( key ){
-	return axios.get(`/api/search/${key}`, auth())
-		.then( response => response.data )
-}
+export let getTimelineForUser = (user) =>
+	authenticatedRequest( 'get', `/api/timeline/${user}` );
 
-export function setFollow( following , who ){
-	if ( following )
-		return axios.put('/api/followers/'+who, {},auth() ).then(response=>mirror(response.data))
-	else 
-		return axios.delete('/api/followers/'+who, auth() ).then(response=>mirror(response.data))	
-}
+export let getChripById = (chirpId) =>
+	authenticatedRequest( 'get', '/api/chirp/'+chirpId );
 
-export function getRelation(user){
-	return axios.get('/api/relation/'+user,auth())
-		.then( response => mirror(response.data) )
-}
+export let saveChirp = (chirp) =>
+	authenticatedRequest( 'post', '/api/chirps', chirp);
 
-export function getReplays ( chirpId ){
-	return mirror(axios.get('/api/replays/'+chirpId, auth())
-		.then( response => response.data ))
-}
+export let getUsersByKey = (key) =>
+	authenticatedRequest( 'get', `/api/search/${key}` );
 
-export function postReplay( replay ){
-	return axios.post('/api/replays', replay, auth())
-		.then( reponse => reponse.data )
-}
+export let setFollow = ( following , who ) =>
+	authenticatedRequest( following ? 'put' : 'delete' , '/api/followers/'+who );
+
+export let getRelation = (user) =>
+	authenticatedRequest( 'get', '/api/relation/'+user ) ;
+
+export let getReplays = ( chirpId ) =>
+	authenticatedRequest( 'get', '/api/replays/'+chirpId ) ;
+
+export let postReplay = ( replay, chirpId ) =>
+	authenticatedRequest( 'post', '/api/replays/'+chirpId, replay ) ;
+
+export let getIdOfUser = ( userName ) =>
+	authenticatedRequest( 'get', '/api/userId/'+userName);

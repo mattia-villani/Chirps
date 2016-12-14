@@ -9,8 +9,11 @@ export class ChirpItem extends React.Component {
     let chirp = props.chirp;
     
     this.state = {
-      chirp:chirp
+      chirp:chirp.body,
+      chirpId: chirp.chirpId,
+      userId: chirp.userId
     }
+    console.log("Displaying chirp "+JSON.stringify(this.state))
 
   }
 
@@ -24,17 +27,17 @@ export class ChirpItem extends React.Component {
       <li>
         <div className='avatar' 
           style={style}
-          onClick={(ev)=>browserHistory.push('/timeline/'+this.state.chirp.user)}
+          onClick={(ev)=>browserHistory.push('/timeline/'+this.state.userId)}
         ><div>{this.state.chirp.user}</div></div>
         <div className='message'
-          onClick={(ev)=>browserHistory.push('/replays/'+this.state.chirp.id)}
+          onClick={(ev)=>browserHistory.push('/replays/'+this.state.chirpId)}
         >{this.state.chirp.message}</div>
       </li>
     );
   }
 }
 
-export class ChirpItemById extends ChirpItem{
+export class ChirpItemById extends React.Component {
   constructor(props){
     super(props)
     this.state={
@@ -52,7 +55,7 @@ export class ChirpItemById extends ChirpItem{
     else if ( this.state.status == 'failed' )
       return (<li>Failed to load chirp</li>)
     else 
-      return (<ChirpItem chirp={this.state.chirp} />)
+      return (<ChirpItem chirp={this.state.chirp} key={this.state.chirp.chirpId}/>)
   }
   
 }

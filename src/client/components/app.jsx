@@ -40,7 +40,7 @@ export class App extends React.Component {
         <Route path="/" component={Home} onEnter={this.requireAuth.bind(this)}/>
         <Route path="/search/" component={Search} onEnter={this.requireAuth.bind(this)} />
         <Route path="/search" component={Search} onEnter={this.requireAuth.bind(this)} />
-        <Route path="/timeline/:userId" component={UserTimeline} onEnter={this.requireAuth.bind(this)}/>
+        <Route path="/timeline/:user" component={UserTimeline} onEnter={this.requireAuth.bind(this)}/>
         <Route path="/timeline" component={Home} onEnter={this.requireAuth.bind(this)}/>
         <Route path="/replays/:chirpId" component={Replays} onEnter={this.requireAuth.bind(this)}/>
         <Route path="/login" component={Login} onEnter={this.redirectToHomeIfLogged.bind(this)} />
