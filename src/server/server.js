@@ -28,24 +28,13 @@ if (process.env.NODE_ENV === 'development') {
 let antidote = antidoteClient.connect(process.env.ANTIDOTE_PORT || 8087, process.env.ANTIDOTE_HOST || "localhost");
 antidote.defaultBucket = "chirps";
 
-
-let getAttribute = ( id, map, attribute ) => 
-  map.map(id).read()
-  .then( a_map => a_map.toJsObject() )
-  .then( js_map => js_map[attribute] )
-
 //-----
 // Database Schema:
 /**
  * user name has to be unique but because of distribution, an id will be used instead.
  * "users" map is a map that goes from user name to the set of identifier of user that have that user name. 
  * In specific moments it is possible to have two users with the same user name
- */
-let user2ids = antidote.map("user2ids")
-let id2users = antidote.map("id2users")
-// the set of user is the set of key from the map user2ids
-let getUserSet = () => user2ids.read().then( map => Object.keys( map.toJsObject() ) )
-/**
+ *//**
  * map userId to an object that contains a map of usefull information about the user.
  *  userId -> {
  *              email : <register of email>
@@ -58,41 +47,7 @@ let getUserSet = () => user2ids.read().then( map => Object.keys( map.toJsObject(
  *              following : <set of userIds of users that are followed by this>
  *              timeline : <set of chirpIds that are pushed to this user timeline>
  *            }
- */ 
-let usersMapName = "userId2userRecord"
-let userId2userRecord = antidote.map(usersMapName)
-// utility methods 
-let getEmailRegisterOfUser = (userId, map=userId2userRecord) => map.map(userId).register('email');
-let getPasswordRegisterOfUser = (userId, map=userId2userRecord) => map.map(userId).register('password');
-let getTimeRegisterOfUser = (userId, map=userId2userRecord) => map.map(userId).register('time');
-let getWrittenChirpsSetOfUser = (userId, map=userId2userRecord) => map.map(userId).set('writtenChirps');
-let getWrittenReplaysSetOfUser = (userId, map=userId2userRecord) => map.map(userId).set('writtenReplays');
-let getFollowersSetOfUser = (userId, map=userId2userRecord) => map.map(userId).set('followers');
-let getFollowerCounterCounterOfUser = (userId, map=userId2userRecord) => map.map(userId).counter('followerCounter');
-let getFollowingSetOfUser = (userId, map=userId2userRecord) => map.map(userId).set('following');
-let getTimelineSetOfUser = (userId, map=userId2userRecord) => map.map(userId).set('timeline');
-
-let readTimeline = (userId, map=userId2userRecord) => getAttribute(userId, map, "timeline" )
-let readWritten = (userId, map=userId2userRecord) => getAttribute(userId, map, "writtenChirps" )
-let readFollowers = (userId, map=userId2userRecord) => getAttribute(userId, map, "followers" )
-let readFollowing = (userId, map=userId2userRecord) => getAttribute(userId, map, "following" )
-
-// class style user
-function User (userId, map=userId2userRecord) {
-  return { 
-    getEmail : () => getEmailRegisterOfUser(userId, map),
-    getPassword : () => getPasswordRegisterOfUser(userId, map),
-    getTime : () => getTimeRegisterOfUser(userId, map),
-    getWrittenChirps : () => getWrittenChirpsSetOfUser(userId, map),
-    getWrittenReplays : () => getWrittenReplaysSetOfUser(userId, map),
-    getFollowers : () => getFollowersSetOfUser(userId, map),
-    getFollowerCounter : () => getFollowerCounterCounterOfUser(userId, map),
-    getFollowing : () => getFollowingSetOfUser(userId, map),
-    getTimeline : () => getTimelineSetOfUser(userId, map)
-  }
-}
-
-/**
+ *//**
  * chirpId -> {
  *              chirpId : <this id ( the key in the map)>
  *              userId : <register of userId of the writer user>
@@ -100,30 +55,7 @@ function User (userId, map=userId2userRecord) {
  *              time : <register of the time when the chirp was added>
  *              replays : <set of replayIds>
  *            }
- */
-let chirpsMapName = "chirpId2chirp"
-let chirpId2chirp = antidote.map(chirpsMapName)
-// utility methods
-let getChirpIdRegisterOfChirp = (chirpId, map=chirpId2chirp) => map.map(chirpId).register('chirpId');
-let getUserIdRegisterOfChirp = (chirpId, map=chirpId2chirp) => map.map(chirpId).register('userId');
-let getBodyRegisterOfChirp = (chirpId, map=chirpId2chirp) => map.map(chirpId).register('body');
-let getTimeRegisterOfChirp = (chirpId, map=chirpId2chirp) => map.map(chirpId).register('time');
-let getReplaysSetOfChirp = (chirpId, map=chirpId2chirp) => map.map(chirpId).set('repelays');
-// class style chirp
-function Chirp (chirpId, map=chirpId2chirp) {
-  return {
-    getChirpId : () => getChirpIdRegisterOfChirp(chirpId, map),    
-    getUserId : () => getUserIdRegisterOfChirp(chirpId, map),
-    getBody : () => getBodyRegisterOfChirp(chirpId, map),
-    getTime : () => getTimeRegisterOfChirp(chirpId, map),
-    getReplays : () => getReplaysSetOfChirp(chirpId, map)
-  }
-}
-
-let readReplays = (chirpId, map=chirpId2chirp) => getAttribute(chirpId, map, "repelays" )
-
-
-/**
+ *//**
  * replayId -> {
  *                replayId: <this id ( the key in the map)>
  *                userId : <register of userId of the writer user>
@@ -132,23 +64,109 @@ let readReplays = (chirpId, map=chirpId2chirp) => getAttribute(chirpId, map, "re
  *                body : <register of the body of the chirp>
  *             }
  */
-let replaysMapName = "replayId2replay"
-let replayId2replay = antidote.map(replaysMapName)
-// utility methods
-let getReplayIdRegisterOfReplay = (replayId, map=replayId2replay) => map.map(replayId).register('replayId');
-let getUserIdRegisterOfReplay = (replayId, map=replayId2replay) => map.map(replayId).register('userId');
-let getChirpIdOfReplay = (replayId, map=replayId2replay) => map.map(replayId).register('chirpId');
-let getBodyRegisterOfReplay = (replayId, map=replayId2replay) => map.map(replayId).register('body');
-let getTimeRegisterOfReplay = (replayId, map=replayId2replay) => map.map(replayId).register('time');
-// class style chirp
-function Replay (replayId, map=replayId2replay) {
-  return {
-    getReplayId : () => getReplayIdRegisterOfReplay(replayId, map),
-    getUserId : () => getUserIdRegisterOfReplay(replayId, map),
-    getChirpId : () => getChirpIdOfReplay(replayId, map),
-    getTime : () => getTimeRegisterOfReplay(replayId, map),
-    getBody : () => getBodyRegisterOfReplay(replayId, map)
+
+let dbSchema = {
+  name2ids: [
+          ["ids",               "set"],
+        ],
+  id2names: [
+          ["names",             "set"],
+        ],
+  user : [
+          ["email",             "register"],
+          ["password",          "register"],
+          ["time",              "register"],
+          ["writtenChirps",     "set"],
+          ["writtenReplays",    "set"],
+          ["followers",         "set"], // following this
+          ["followerCounter",   "counter"],
+          ["following",         "set"], // the ones this is following
+          ["timeline",          "set"],
+        ],
+  chirp : [
+          ["chirpId",           "register"],
+          ["userId",            "register"],
+          ["body",              "register"],
+          ["time",              "register"],
+          ["replays",           "set"],
+        ],
+  replay : [
+          ["replayId",          "register"],
+          ["userId",            "register"],
+          ["chirpId",           "register"],
+          ["time",              "register"],
+          ["body",              "register"],
+        ]
+}
+
+let dbTableIds = [];
+let dbMaps = [];
+function db_id( schemaEntity, attributeName, type ){
+  return schemaEntity+"_"+attributeName+"_"+type
+}
+// generating the maps and the ids.
+(() => {
+  for ( var k in dbSchema ){
+    let arr = dbSchema[k]
+    for ( var i in arr ){
+      let dbId = db_id( k , arr[i][0], arr[i][1] )
+      dbTableIds.push( dbId )
+      dbMaps[dbId] = antidote.map(dbId)
+    }
   }
+  console.log("The db will contain the following ids ")
+  for ( var i in dbTableIds )
+    console.log("\t"+dbTableIds[i])
+})()
+
+function getCrdtMap( schemaEntity, attributeName, type, tx=undefined ){
+  let id = db_id( schemaEntity, attributeName, type )
+  if ( dbTableIds.indexOf(id) == -1 ) throw "Invalid db id "+id
+  else return tx ? tx.map(id) : dbMaps[id]
+}
+
+function getObject( identifier, entity, tx=undefined ){
+  let fields = dbSchema[entity]
+  var obj = {}
+  for ( var i in fields )
+    obj[fields[i][0]] = getCrdtMap(entity, fields[i][0],fields[i][1],tx)[fields[i][1]](identifier)
+  /*console.log("Object "+identifier+" of "+entity+" { ")
+  for ( var att in obj )
+    console.log("\t\t"+att+": "+Object.keys(obj[att]))
+  console.log("\t}") */
+  return obj; 
+}
+
+async function readEntity( identifier, entity, tx=undefined ){
+  let obj = getObject(identifier, entity, tx)
+  var ret = {}
+  try{
+    for ( var i in obj )  
+      ret[i] = await obj[i].read()
+  }catch( e ){ 
+    throw mirror("error reading entity:",e)
+  }
+  return ret
+}
+
+function getUser2ids ( tx = undefined ){ return getCrdtMap( "name2ids", "ids", "set",tx ); }
+function getId2users ( tx = undefined ){ return getCrdtMap( "id2names", "names", "set",tx ); }
+let user2ids = getUser2ids()
+let id2users = getId2users()
+
+function getUserSet() { 
+  return user2ids.read()
+    .then( crdt => crdt.toJsObject() )
+    .then( js => Object.keys(js) )
+}
+
+/**
+ * properties = array of  [ <entity>, <attribute>, <type> ]
+ */
+function getPropertiesFromIds( ids, properties, tx=undefined ){
+    return (tx?tx:antidote).readBatch( 
+      properties.map( (e,i) => getCrdtMap(e[0], e[1], e[2], tx)[e[2]](ids[i]) )
+    )
 }
 
 /**
@@ -169,7 +187,8 @@ function createId(prefix){
 // register a user. returns the userId or throw an exception 
 function registerUser ( user, password, email ){
   if ( !user || !password || !email ) throw "At leat one of the field is invalid"
-  return user2ids.set( user ).read()
+  console.log("registring "+user+", "+password+", "+email)
+  return user2ids.set(user).read()
     .then( idset => {
       if ( idset && idset.length && idset.length >= 1 ) 
         throw "User already in use";
@@ -177,16 +196,16 @@ function registerUser ( user, password, email ){
     })
     .then( tx => {
       let userId = createId("user")
-      let userObj = User(userId, tx.map(usersMapName))      
+      let userObj = getObject(userId, "user", tx)      
       return tx.update( [ 
-        tx.map("user2ids").set(user).add(userId),
-        tx.map("id2users").set(userId).add(user),
-        userObj.getPassword().set(password),
-        userObj.getEmail().set(email),
-        userObj.getTime().set( Date.now() ),
-        userObj.getFollowers().add( userId ),
-        userObj.getFollowing().add( userId ),
-        userObj.getFollowerCounter().increment(1)
+        getUser2ids(tx).set(user).add(userId),
+        getId2users(tx).set(userId).add(user),
+        userObj.password.set(password),
+        userObj.email.set(email),
+        userObj.time.set( Date.now() ),
+        userObj.followers.add( userId ),
+        userObj.following.add( userId ),
+        userObj.followerCounter.increment(1)
       ] )
       .then( _ => tx.commit() )
       .then ( _ => userId )
@@ -203,13 +222,13 @@ function createChirp ( userId, body ){
   return antidote.startTransaction()
     .then( tx => {
       let chirpId = createId("chirp")
-      let chirpObj = Chirp( chirpId, tx.map(chirpsMapName) )
+      let chirpObj = getObject( chirpId, "chirp", tx )
       return tx.update( [
-        getWrittenChirpsSetOfUser(userId, tx.map(usersMapName)).add(chirpId),
-        chirpObj.getChirpId().set(chirpId),
-        chirpObj.getUserId().set(userId),
-        chirpObj.getBody().set(body),
-        chirpObj.getTime().set(Date.now())
+        getObject( userId, "user", tx ).writtenChirps.add(chirpId),
+        chirpObj.chirpId.set(chirpId),
+        chirpObj.userId.set(userId),
+        chirpObj.body.set(body),
+        chirpObj.time.set(Date.now())
       ] )
       .then( _ => tx.commit() )
       .then ( _ => chirpId )
@@ -226,15 +245,15 @@ function createReplay ( userId, chirpId, body ){
   return antidote.startTransaction()
     .then( tx => {
       let replayId = createId("replay")
-      let replayObj = Replay( replayId, tx.map(replaysMapName) )
+      let replayObj = getObject( replayId, 'replay', tx )
       return tx.update( [
-        replayObj.getReplayId().set(replayId),
-        replayObj.getUserId().set(userId),
-        replayObj.getChirpId().set(chirpId),
-        replayObj.getBody().set(body),
-        replayObj.getTime().set(Date.now()),
-        getWrittenReplaysSetOfUser(userId, tx.map(usersMapName)).add(replayId),
-        getReplaysSetOfChirp(chirpId, tx.map(chirpsMapName)).add(replayId),
+        replayObj.replayId.set(replayId),
+        replayObj.userId.set(userId),
+        replayObj.chirpId.set(chirpId),
+        replayObj.body.set(body),
+        replayObj.time.set(Date.now()),
+        getObject( userId, "user", tx ).writtenReplays.add(replayId),
+        getObject( chirpId, "chirp", tx ).replays.add(replayId)
       ] )
       .then( _ => tx.commit() )
       .then ( _ => replayId )
@@ -261,23 +280,14 @@ function createReplay ( userId, chirpId, body ){
  * Validate an id ( this means, that it checks if the id is actually present in the db)
  */
 async function validateId(id){
-  if ( id.indexOf("user")==0 ) 
-    return id2users.set(id).read()
-        .then(set =>{ 
-          if(set && set.length && set.length > 0) return id; 
-          else throw "Invalid user id "+id+" ( got "+set+" )"; 
-        })
-  if ( id.indexOf("chirp")==0 ) 
-    return chirpId2chirp.map(id).read()
-        .then(map =>{ 
-          if(map) return id; 
-          else throw "Invalid chirp id "+id; 
-        })
-  if ( id.indexOf("replay")==0 ) 
-    return replayId2replay.map(id).read()
-        .then(map =>{ 
-          if(map) return id; 
-          else throw "Invalid replay id "+id; 
+  let entities = ['user','chirp','replay'];
+  for ( var i in entities )
+    if ( id.indexOf(entities[i]) == 0 )
+      return getObject( id, entities[i] ).time.read()
+        .then( time => {
+          if ( time && time > 0 )
+            return id;
+          else throw "Invalid "+entities[i]+" id "+id
         })
   throw "Invalid id "+id;
 }
@@ -286,9 +296,9 @@ async function validateId(id){
  */
 async function dispatchChirpId ( chirpId, userId ){
   if ( true ) // pushing
-    return getFollowersSetOfUser( userId ).read()
+    return getObject( userId, "user" ).followers.read()
       .then( set => antidote.update( 
-          set.map( e => getTimelineSetOfUser(e).add(chirpId) )
+          set.map( e => getObject( e, "user" ).timeline.add(chirpId) )
       ))
 }
 /**
@@ -313,13 +323,13 @@ function currentUser(request) {
     .then( set => {
       if( ! set || set.length == 0) throw "UserId unknown"
       if(set.indexOf(user) == -1) throw "UserId Unmatching with the user name"
-      return getPasswordRegisterOfUser(userId).read()
+      return getObject( userId, "user" ).password.read()
     })
     .then( readPassword => {
       if ( password != readPassword) throw "Invalid password"
       return userId
     })
-    .catch(e => {throw "Unable to authentify user "+user+":"+userId;} )
+    .catch(e => {throw "Unable to authentify user "+user+":"+userId+" ("+e+")";} )
 }
 
 /**
@@ -332,8 +342,8 @@ function currentUser(request) {
  */
 async function getRelation( userIdFollowed, mineId ){
   console.log("reading relation between "+userIdFollowed+" and me "+ mineId)
-  let f_ers = await readFollowers( userIdFollowed )
-  let f_ing = await readFollowing( mineId )
+  let f_ers = await getObject( userIdFollowed, "user" ).followers.read()
+  let f_ing = await getObject( mineId, "user" ).followers.read()
   return {
         it_is_followed_by_me: f_ers.indexOf(mineId) != -1, 
         it_is_following_me: f_ing.indexOf(userIdFollowed) != -1
@@ -343,24 +353,25 @@ async function getRelation( userIdFollowed, mineId ){
  * This function add the relation userIdFollowing is following userIdFollowed
  */
 function addRelalation( userIdFollowed, userIdFollowing ){
+  console.log("Adding relation "+userIdFollowing+" following "+userIdFollowed)
   return antidote.update([
-    getFollowersSetOfUser(userIdFollowed).add(userIdFollowing),
-    getFollowerCounterCounterOfUser(userIdFollowed).increment(1),
-    getFollowingSetOfUser(userIdFollowing).add(userIdFollowed),
+    getObject( userIdFollowed, "user" ).followers.add(userIdFollowing),
+    getObject( userIdFollowed, "user" ).followerCounter.increment(1),
+    getObject( userIdFollowing, "user" ).following.add(userIdFollowed),
   ]).then(_ =>console.log("Relation updated (added)"))
 }
 /**
  * This function remove the relation userIdFollowing is following userIdFollowed
  */
 function removeRelalation( userIdFollowed, userIdFollowing ){
-  return getFollowersSetOfUser(userIdFollowed).read()
+  return getObject(userIdFollowed,"user").followers.read()
     .then( fs => 
       (fs.indexOf(userIdFollowing) == -1) ? 
       console.log("removing relation between "+userIdFollowed+" and "+userIdFollowing+" that does not exists"):
       (antidote.update([
-        getFollowersSetOfUser(userIdFollowed).remove(userIdFollowing),
-        getFollowerCounterCounterOfUser(userIdFollowed).increment(-1),
-        getFollowingSetOfUser(userIdFollowing).remove(userIdFollowed),
+        getObject( userIdFollowed, "user" ).followers.remove(userIdFollowing),
+        getObject( userIdFollowed, "user" ).followerCounter.increment(-1),
+        getObject( userIdFollowing, "user" ).following.remove(userIdFollowed),
       ]).then(_=> console.log("Relation updated (deleted)")))
     )
 }
@@ -399,13 +410,13 @@ function readBatch( map ){
  *  body: <....>
  * }
  */
-function getSortedChirpSetFromChirpIdSet( chirpIds ){
-  return (!chirpIds || chirpIds.length == 0) ? [] :
-    antidoteReadBatch(
-      mirror("sent to read batch", chirpIds).map( id => chirpId2chirp.map(id) )
-    )
-    .then( reps => reps.map(e => e.toJsObject()) )
-    .then( reps => {reps.sort((x, y) => y.time - x.time); return reps})
+async function getSortedChirpSetFromChirpIdSet( chirpIds ){
+  if (!chirpIds || chirpIds.length == 0) return [];
+  var chirps = []
+  for ( var i in chirpIds )
+    chirps.push( await readEntity(chirpIds[i],"chirp") )
+  chirps.sort((x, y) => y.time - x.time)
+  return chirps;
 }
 
 
@@ -460,45 +471,55 @@ function insertDummyUsers (){
 //------------------------------------------------------------------
 // print all the inserted values in the db
 async function dumpDB() {
-  console.log("-- dump of db --")
-  let db = { 
-      user2ids: user2ids, 
-      id2users: id2users,
-      userId2userRecord: userId2userRecord,
-      chirpId2chirp: chirpId2chirp,
-      replayId2replay: replayId2replay
-    }
-  return Promise.all( Object.keys( db ).map( key =>   
-    (db[key]).read().then( map => map.toJsObject() )
+  var string;
+  var str = "-- dump of db --";
+  console.log( str ) 
+  string = str
+  let maps = dbMaps ;
+  for ( var mapId in maps )
+    await maps[mapId].read()
+      .then( crdt_map => crdt_map.toJsObject() )
       .then( map => {
-              console.log( ">> " + key + ": " )
-              for ( var v in map )
-                console.log( "\t"+v+": "+JSON.stringify(map[v]) )
+        str = ">> "+mapId+": "
+        console.log(str)
+        string += "<br/>"+str 
+        for ( var v in map ){
+           str = "\t"+v+": "+JSON.stringify(map[v]) 
+           console.log(str)
+           string += "<br/>"+str 
+        }
       })
-  )).then( _=> console.log("-- end of dump --") )
+  str = "-- end of dump --" 
+  console.log(str)
+  string += "<br/>"+str 
+  return string
 }
 //------------------------------------------------------------------
 //------------------------------------------------------------------
 //------------------------------------------------------------------
 // clear the db
-function clearDB() {
+async function clearDB() {
   console.log("-- Clearing db --")
-  let db = { 
-      user2ids: user2ids,
-      id2users: id2users,
-      userId2userRecord: userId2userRecord,
-      chirpId2chirp: chirpId2chirp,
-      replayId2replay: replayId2replay
+  for ( var entity in dbSchema ){
+    console.log("cleanning "+entity)
+    for ( var i in dbSchema[entity] ){
+      let field = dbSchema[entity][i][0]
+      let type = dbSchema[entity][i][1]
+      let map = getCrdtMap( entity, field, type )
+      let mapId = db_id( entity, field, type )
+      console.log("removing from map "+mapId+" ")
+      await map.read()
+        .then( crdt_map => crdt_map.toJsObject() )
+        .then( js_map => Object.keys(js_map) ) 
+        .then( keys => 
+          antidote.update(
+            keys.map( k => map.remove(map[type](k) ) )
+          )
+        ).catch( e => console.error(e) )
     }
-  return Promise.all( Object.keys( db ).map( key =>   
-    (db[key]).read()
-      .then( map => Object.keys(map.toJsObject()) )
-      .then( keys => keys.map( k => (db[key])[(key=='user2ids'||key=='id2users')?'set':'map'](k) ) )
-      .then( maps => maps.map( s => (db[key]).remove(s) ) )
-      .then( removing => antidote.update( removing ) )
-      .then( toBeWaited => { console.log("...map "+key+" cleared"); return toBeWaited; } )
-      .catch( e => console.error(e) )
-  )).then( _ => { console.log("-- end of clearing --"); return dumpDB(); } )
+  }
+  console.log("-- end of clearing --"); 
+  return dumpDB();
 }
 //------------------------------------------------------------------
 //------------------------------------------------------------------
@@ -524,13 +545,10 @@ function resolveConflict(){
 
 
 
-
-
-
-
-
-
-
+async function isPasswordCorrectForUserId( password, userId ){
+  getObject( userId, "user" ).password.read()
+    .then( p => p==password ) 
+}
 
 
 
@@ -544,7 +562,7 @@ function resolveConflict(){
 // insert dummy user
 //insertDummyUsers()
 //.then( _=> dumpDB() )
-clearDB()
+/*clearDB()
 .then( _ => insertDummyUsers() )
 .then( _ => dumpDB() ) // */
 //------------------------------------------------------------------
@@ -608,7 +626,7 @@ server.get(/^\/(timeline)\/.*/, function (req, res, next) {
  * Gives a list of all user-names in the system
  */
 server.get('/api/users', handle(async req => {
-  return await getUserSet()
+  return await dumpDB()
 }));
 
 /**
@@ -627,8 +645,8 @@ server.post('/api/chirps', handleWithAuth(async (req, userId) =>
   await createChirp( userId, req.body )
     .then( chirpId => 
       dispatchChirpId(chirpId, userId)
-      .then( _ => chirpId2chirp.map(chirpId).read() )
-      .then( map => map.toJsObject() ) 
+      .then( _ => readEntity(chirpId, "chirp") )
+      .then( entity => { console.log("Created chirp "+JSON.stringify(entity)); return entity;})
     )
 ));
 
@@ -642,8 +660,7 @@ server.post('/api/chirps', handleWithAuth(async (req, userId) =>
  */
 server.get('/api/chirp/:chirpId', handle( async req => 
   await validateId(req.params.chirpId)
-    .then( id => chirpId2chirp.map(id).read() )
-    .then( map => map.toJsObject() )
+    .then( id => readEntity(id, "chirp") )
 ))
 // function to delete everything (for demos and debugging)
 // e.g.: curl -d "" http://localhost:1337/api/clearChirps
@@ -676,19 +693,18 @@ server.get('/api/search/:key', handle(async req => {
  */
 server.get('/api/replays/:chirpId', handle( async (req) => 
     await validateId(req.params.chirpId)
-      .then( id => readReplays(id) )
-      .then( replayIds => replayIds) 
-      .then( replayIds => 
-        ( !replayIds || replayIds.length == 0 ) ?
-          [] : (
-            antidoteReadBatch( replayIds.map( e => replayId2replay.map(e) ) )
-            .then( maps => maps.map( e => e.toJsObject()) )
-            .then( replays => {
-              replays.sort((x, y) => x.time - y.time)
-              return replays
-            })
-          )
-      )
+      .then( id => getObject(id,"chirp").replays.read() )
+      .then( async (replayIds) => { 
+        console.log("Going to load replays "+replayIds)
+        if ( !replayIds || replayIds.length == 0 ) return []
+        var ret = []
+        for ( var i in replayIds )
+          await readEntity(replayIds[i], "replay")
+            .then( ent => ret.push(ent) )
+            .catch( e => mirror("Failled to load entity", e) )
+        ret.sort((x, y) => x.time - y.time)
+        return ret;
+      })
 ))
 /**
  * Insert a replay to a chirp whose chirpId is passed through the get params.
@@ -698,8 +714,7 @@ server.get('/api/replays/:chirpId', handle( async (req) =>
 server.post('/api/replays/:chirpId', handleWithAuth( async (req,userId) => 
     await validateId(req.params.chirpId)
       .then( id => createReplay(userId, id, req.body ) )
-      .then( id => replayId2replay.map(id).read() )
-      .then( map => map.toJsObject() )
+      .then( id => readEntity(id,"replay") )
 ))
 /**
  * Register user to the server
@@ -728,17 +743,17 @@ server.get('/api/relation/:userId', handleWithAuth(async (req, mineId) =>
  */
 server.put('/api/followers/:userId', handleWithAuth(async (req, mineId) => 
   await validateId(req.params.userId)
-    .then( id => addRelalation( id, mineId ).then( _ => getRelation(id)) )
+    .then( id => addRelalation( id, mineId ).then( _ => getRelation(id, mineId)) )
 ));
 server.delete('/api/followers/:userId', handleWithAuth(async (req, mineId) => 
   await validateId(req.params.userId)
-    .then( id => removeRelalation( id, mineId ).then( _ => getRelation(id)) )
+    .then( id => removeRelalation( id, mineId ).then( _ => getRelation(id, mineId)) )
 ));
 /**
  * Gives the timeline for the current user
  */
 server.get('/api/timeline', handleWithAuth(async (req, userId) => 
-  await readTimeline(userId)
+  await getObject(userId,"user").timeline.read()
     .then( chirpIds => getSortedChirpSetFromChirpIdSet( chirpIds ) )
 ));
 /**
@@ -746,7 +761,7 @@ server.get('/api/timeline', handleWithAuth(async (req, userId) =>
  */
 server.get('/api/timeline/:userId', handle(async req => 
   await validateId(req.params.userId)
-    .then( id => readWritten(id) )
+    .then( id => getObject(id,"user").writtenChirps.read() )
     .then( chirpIds => getSortedChirpSetFromChirpIdSet( chirpIds ) )
 ));
 /**
@@ -759,7 +774,33 @@ server.post('/api/login/', handle(async req => {
   if ( ! idSet || idSet.length==0 ) throw "User unknown";
   else if ( idSet.length == 1 ) {
     let userId = idSet[0]
-    return await getPasswordRegisterOfUser( userId ).read()
+    return await isPasswordCorrectForUserId( password, userId )
+      .then( success => {
+        if ( success ) return ({userId:userId})
+        else throw "Unmatching password"
+      })
+  } else return ({duplicatedUser:true})
+}));
+/**
+ * resolve a conflict of names.
+ * the req.body is meant to be an object like
+ * {
+ *    user: <...>,
+ *    password: <...>,
+ *    email: <...>
+ * }.
+ * if the email is associated at the oldest user, this function works as a login and returns the id.
+ * otherwise, it will be asked to the user to change the name
+ */
+server.post('/api/conflict/', handle(async req => {
+  let user = req.body.user
+  let password = req.body.password
+  let email = req.body.email
+  let idSet = await user2ids.set(user).read()
+  if ( ! idSet || idSet.length==0 ) throw "User unknown";
+  else if ( idSet.length == 1 ) {
+    let userId = idSet[0]
+    return await getObject( userId, "user" ).password.read()
       .then( p => { 
           if (p==password) return ({userId:userId}) 
           else throw "Unmatching password"
@@ -771,8 +812,9 @@ server.post('/api/login/', handle(async req => {
  * if the user is multiplied, the older one will be returned
  */
 server.get('/api/userId/:userName', handle( async req => 
-  user2ids.set( req.params.userName ).read()
+  await user2ids.set( mirror("Searching user",req.params.userName) ).read()
     .then( idSet => {
+      mirror("Matchs :", idSet )
       if ( ! idSet || idSet.length == 0 ) throw "Unknow user name"
       else if ( idSet.length > 1 ) idSet.sort( (x,y) => x.localeCompare(y)) 
       return idSet[0]

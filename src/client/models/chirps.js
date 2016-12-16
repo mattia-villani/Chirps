@@ -76,12 +76,12 @@ function authenticatedRequest(type, path, arg=undefined){
 				axios[type]( path, auth() )
 		)
 		.catch( e => {
-			if (e.status == 400){ // checking the validity of token
+			if (e.response.status == 400){ // checking the validity of token
 				console.error("Error authenticating "+ e)
 				removeLoginValues();
 				browserHistory.push('/login');						
 			}else {
-				console.log("error occourred "+e+": "+JSON.stringify(e) )
+				console.log("error occourred "+e )
 				throw e;
 			}
 		})
