@@ -29,20 +29,63 @@ export function getLoginValues( ){
 
 export function getRegistration(args){
 	return axios.post('/api/register/', args)
-		.then( response => {
-			if ( response.status != 200 && response.status != 201 )
-				throw "Error registrating "+response.status+" with data "+response.data;
-			else response.body;
+		.then( response => response.data )
+		.then( data => {
+			saveLoginValues( {
+				user:args.user, 
+				password:args.password,
+				userId:data.userId
+            }); 
+			return data
 		})
 }
 
 export function getAuthentification(args) {
-	return axios.post('/api/login/', args , auth({user:args.user, password:args.password}))
-		.then( response => { 	
-				if ( response.status != 200 )
-    				throw "Error loggin "+response.status+" with data "+response.data;
-				else return mirror( response.data )
- 			})
+	var name = args.user;
+	let handling = (text,response) => {
+			console.log( "Got response "+JSON.stringify(response) )
+			if ( ! response.toBeChanged ) return response;
+			let newUser = prompt(text,"")
+			args['newUser'] = newUser;
+			name = newUser;
+			if ( newUser != null ) 	
+				return axios.post('/api/rename/', args)					
+					.then( r=> r.data)
+					.then( r => handling(text,r) )
+			else throw "new User not provided..."
+		}
+
+	return axios.post('/api/login/', args )
+		.then( response => mirror( response.data ) )
+		.then( ret => {
+			var promptQuery;
+			if ( ret.duplicatedUser || ret.duplicatedName ){
+				let email = prompt("Ambiguity, please enter your email","")
+				args['email'] = email;
+				if ( email == null ) throw "Could not manage the conflict"
+			}
+			if ( ret.duplicatedUser ){
+				promptQuery = "Your user name is occupied, please, choose another"
+				return axios.post('/api/conflict/', args)
+					.then( r => {
+						args['userId'] = r.data.userId
+						return mirror(r.data) 
+					})
+					.then( r => handling(promptQuery, r))
+			} else if ( ret.duplicatedName ){
+				promptQuery = "Your name is replicated : "+JSON.stringify(ret.duplicatedName)
+				args['userId'] = ret.userId;
+				return handling( promptQuery, { toBeChanged:true } )
+			} else return ret;
+		})
+		.then( data => {
+			saveLoginValues( {
+				user:name, 
+				password:args.password,
+				userId:data.userId
+            }); 
+			return data
+		})
 }
 function mirror( something ){
 	console.log( JSON.stringify(something) )
@@ -86,7 +129,7 @@ function authenticatedRequest(type, path, arg=undefined){
 			}
 		})
 		.then( response => {
-			console.log("Request "+type+" to "+path+" with arg "+arg+" -->> "+JSON.stringify(response.data))
+			console.log("Request "+type+" to "+path+" with arg "+JSON.stringify(arg)+" -->> "+JSON.stringify(response.data))
 			return response.data;
 		})
 }

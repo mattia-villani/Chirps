@@ -22,11 +22,6 @@ export const Login = withRouter(
         this.setState({sending:true});
         return requester( args )
             .then(data => { 
-                api.saveLoginValues( {
-                    user:args.user, 
-                    password:args.password,
-                    userId:data.userId
-                });
                 this.setState({sending:false});
                 return true;
             })

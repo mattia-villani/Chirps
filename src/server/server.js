@@ -82,6 +82,9 @@ let dbSchema = {
           ["followerCounter",   "counter"],
           ["following",         "set"], // the ones this is following
           ["timeline",          "set"],
+          ["chirpIdToBePulled", "set"],
+          ["lastPullableChirp", "register"],
+          ["lastPushedChirp",   "register"],
         ],
   chirp : [
           ["chirpId",           "register"],
@@ -96,8 +99,15 @@ let dbSchema = {
           ["chirpId",           "register"],
           ["time",              "register"],
           ["body",              "register"],
-        ]
+        ],
+  id2Ids : [ // the map's key for the pair (u,v) an the attribute att (not set), is u$$v
+          ["mergedTo",          "register"], // this means that the key was merged to the content value
+          ["lastPull",          "register"], // (u,v)'last pull is the time when v has pulled for the last time u 
+          ["lastPush",          "register"], // (u,v)'last pull is the time when u has pushed for the last time to v
+  ]
 }
+
+function getCombinedId( idA, idB ) { return idA+"$$"+idB }
 
 let dbTableIds = [];
 let dbMaps = [];
@@ -163,9 +173,12 @@ function getUserSet() {
 /**
  * properties = array of  [ <entity>, <attribute>, <type> ]
  */
-function getPropertiesFromIds( ids, properties, tx=undefined ){
-    return (tx?tx:antidote).readBatch( 
-      properties.map( (e,i) => getCrdtMap(e[0], e[1], e[2], tx)[e[2]](ids[i]) )
+function readPropertiesFromIds( ids, properties, tx=undefined ){
+    return antidoteReadBatch( 
+      properties.map( (e,i) => {
+        console.log(" --- --- --- read << CrdtMap "+e[0]+"."+e[1]+"."+e[2]+".("+ids[i]+")")
+        return getCrdtMap(e[0], e[1], e[2], tx)[e[2]](ids[i]) 
+      })
     )
 }
 
@@ -190,9 +203,11 @@ function registerUser ( user, password, email ){
   console.log("registring "+user+", "+password+", "+email)
   return user2ids.set(user).read()
     .then( idset => {
+ ///*
       if ( idset && idset.length && idset.length >= 1 ) 
         throw "User already in use";
-      else return antidote.startTransaction();
+      else // */ 
+        return antidote.startTransaction();
     })
     .then( tx => {
       let userId = createId("user")
@@ -289,12 +304,14 @@ async function validateId(id){
             return id;
           else throw "Invalid "+entities[i]+" id "+id
         })
+        .then( resolveId )
   throw "Invalid id "+id;
 }
 /**
  * Function to dispatch a chirpId to the followers of a userId
  */
 async function dispatchChirpId ( chirpId, userId ){
+  userId = await resolveId( userId ).catch( e =>{ throw e; } )
   if ( true ) // pushing
     return getObject( userId, "user" ).followers.read()
       .then( set => antidote.update( 
@@ -317,7 +334,7 @@ function currentUser(request) {
   if (!credentials.user||!credentials.password||!credentials.userId) throw "Authorization badly formmated"
   let user = credentials.user;
   let password = credentials.password;
-  let userId = credentials.userId;
+  let userId = await resolveId( credentials.userId ).catch(e => {throw e})
   console.log("Verifing credentials "+JSON.stringify(credentials))
   return id2users.set(userId).read()
     .then( set => {
@@ -342,8 +359,8 @@ function currentUser(request) {
  */
 async function getRelation( userIdFollowed, mineId ){
   console.log("reading relation between "+userIdFollowed+" and me "+ mineId)
-  let f_ers = await getObject( userIdFollowed, "user" ).followers.read()
-  let f_ing = await getObject( mineId, "user" ).followers.read()
+  let f_ers = await resolveIds(getObject( userIdFollowed, "user" ).followers.read())
+  let f_ing = await resolveIds(getObject( mineId, "user" ).followers.read())
   return {
         it_is_followed_by_me: f_ers.indexOf(mineId) != -1, 
         it_is_following_me: f_ing.indexOf(userIdFollowed) != -1
@@ -354,16 +371,21 @@ async function getRelation( userIdFollowed, mineId ){
  */
 function addRelalation( userIdFollowed, userIdFollowing ){
   console.log("Adding relation "+userIdFollowing+" following "+userIdFollowed)
+  let time = Date.now()
+  let id2id = getCombinedId( userIdFollowed, userIdFollowing )
   return antidote.update([
     getObject( userIdFollowed, "user" ).followers.add(userIdFollowing),
     getObject( userIdFollowed, "user" ).followerCounter.increment(1),
     getObject( userIdFollowing, "user" ).following.add(userIdFollowed),
+    getObject( id2id, "id2Ids" ).lastPull.set(time),
+    getObject( id2id, "id2Ids" ).lastPush.set(time),
   ]).then(_ =>console.log("Relation updated (added)"))
 }
 /**
  * This function remove the relation userIdFollowing is following userIdFollowed
  */
 function removeRelalation( userIdFollowed, userIdFollowing ){
+  let id2id = getCombinedId( userIdFollowed, userIdFollowing )
   return getObject(userIdFollowed,"user").followers.read()
     .then( fs => 
       (fs.indexOf(userIdFollowing) == -1) ? 
@@ -372,6 +394,8 @@ function removeRelalation( userIdFollowed, userIdFollowing ){
         getObject( userIdFollowed, "user" ).followers.remove(userIdFollowing),
         getObject( userIdFollowed, "user" ).followerCounter.increment(-1),
         getObject( userIdFollowing, "user" ).following.remove(userIdFollowed),
+        getObject( id2id, "id2Ids" ).lastPull.set(undefined),
+        getObject( id2id, "id2Ids" ).lastPush.set(undefined),
       ]).then(_=> console.log("Relation updated (deleted)")))
     )
 }
@@ -386,20 +410,6 @@ async function antidoteReadBatch( arr ){
     ret.push( val )
   }
   return ret
-}
-function readBatch( map ){
-  let index2property = []
-  return antidote
-      .readBatch( 
-        Object.keys(map).map( (k, i) => {
-          index2property[i] = k;
-          return map[k];
-        } )
-      ).then( reads =>{
-          let ret = [];
-          reads.map( (v,i) => { ret[index2property[i]] = v; })
-          return ret;
-        })
 }
 /**
  * this function read batchly all the chirpId present in the arg set
@@ -536,28 +546,147 @@ async function clearDB() {
 //------------------------------------------------------------------
 //------------------------------------------------------------------
 //------------------------------------------------------------------
+function resolveId( id ) { return resolveIds( [id] ) }
+function resolveIds( ids ){
+  return readPropertiesFromIds( ids, ids.map( m => ['id2Ids','mergedTo','register']) )
+    .then( vals => 
+      vals.map( (id, i) => id ? id : ids[i] )
+    )
+}
+/**
+ * function that chose which id is unified.
+ */
+function mergeRequest( idA, idB ){
+  let olderId 
+  let yungerId 
+  let names 
+  let timeProp = ['user', 'time', 'register'];
+  return antidote.startTransaction()
+    .then( tx => readPropertiesFromIds(
+        [idA, idB, idA, idB],[ 
+          timeProp, 
+          timeProp, 
+          ['id2names','names','set'],
+          ['id2names','names','set'],
+        ], tx
+      ).then( vals => {
+        var toBeMerge = false
+        if ( vals[0] < vals[1] ) { 
+          olderId = idA; 
+          yungerId = idB;
+          names = vals[3];
+        }else {
+          olderId = idB; 
+          yungerId = idA;
+          names = vals[2];
+        }
+        return tx.update([
+            getCrdtMap('id2Ids','mergedTo','register').register(yungerId).set(olderId),
+          ].concat( names.map( n => 
+            getCrdtMap('name2ids','ids','set').set(n).remrove(yungerId)
+          )).concat( names.map( n => 
+            getCrdtMap('name2ids','ids','set').set(n).add(olderId)
+          )).concat( names.mpa( n => 
+            getCrdtMap('id2names','names','set').set(yungerId).remove(n),
+          )).concat( names.mpa( n => 
+            getCrdtMap('id2names','names','set').set(olderId).add(n),
+          ))        
+        )
+      })
+      .then( _ => tx.commit().then( _=> olderId ) )
+    )
+}
 /**
  * function called when a user try to log in 
+ * returns {
+ *  status : <'ok'|'toBeChanged'>,
+ *  userId : <userId>
+ * }
  */
-function resolveConflict(){
+function resolveUserDuplication( idSet, email ){
+  return readPropertiesFromIds( idSet.concat(idSet), 
+      idSet.map( e => ['user','time','register'] ).concat(
+        idSet.map( e => ['user','email','register'] )
+      ) )
+      .then( vals => {
+        let length = idSet.length
+        let times = vals.slice(0,length)
+        let emails = vals.slice(length, length*2)
+        // was the same email used twice ? 
+        for ( var i = 0; email && email.length && i<email.length - 1 ; i++ )
+          for ( var j = i +1 ; j<email.length; j++ )
+            if ( emails[i] == emails[j] )
+              return mergeRequest( idSet[i], idSet[j] )
+                .then( newId => 
+                  resolveUserDuplication(
+                    idSet.filter( (id,I) => I!=i && I!=j ).push(newId), 
+                    email.filter( (em,I) => I!=i && I!=j ).push(emails[i])
+                  )
+                )
+        let indexOfEmail = emails.indexOf( email )
+        if ( indexOfEmail == -1 ) throw "Unkown email"
+        let userId = idSet[indexOfEmail] 
+        let minTimeIndex = Object.keys(times).reduce( (i,j) => ( (times[i]<times[j]) ? i : j ) , 0)
+        return mirror("Resolving duplication ",{
+          status : ((minTimeIndex==indexOfEmail)?'ok':'toBeChanged'),
+          userId : userId
+        })
+      })
+}
+/** 
+ * given the old credentials, the userId which they are refering to and a new username, it replace the username
+ */
+function resetUserName( userId, user, email, password, newUser ){
+  let values = [
+    [userId, ['id2names', "names", "set"]],
+    [userId, ['user', "email", "register"]],
+    [userId, ['user', "password", "register"]],
+    [newUser, ['name2ids', "ids", "set"]],
+  ]
+  return readPropertiesFromIds( values.map( arr => arr[0]), values.map( arr=> arr[1]) )
+    .then( vals =>{
+      if ( !vals[0] || vals[0].indexOf(user) == -1 ) throw "User name "+user+" not associated with id "+userId  
+      if ( email != vals[1] ) throw "Un matching email"
+      if ( password != vals[2] ) throw "Un matching password"
+      vals[3] = vals[3] ? vals[3].filter( id => userId != id ) : []
+      if ( vals[3] && vals[3].length>=1 )throw "New user name "+newUser+" already in use by "+vals[3]
+      return antidote.update([
+        id2users.set(userId).remove(user),
+        id2users.set(userId).add(newUser),
+        user2ids.set(user).remove(userId),
+        user2ids.set(newUser).add(userId),
+      ]).catch( e =>{ throw mirror("Error updating: "+e, e.stack) })
+    })
+    .catch( e =>{ throw mirror( "Error resetting user: "+e, e.stack) })
+}
+/**
+ * given a userId and a user, remove the associations 
+ *  (userId,u) for each u different from user
+ */
+function resolveNameDuplication(userId, nameSet, user){
+  let names = nameSet.filter( u => u!=user )
+  return antidote.update(
+    names.map( n => user2ids.set(n).remove(userId) ).concat(
+      names.map( n => id2users.set(userId).remove(n) )
+    )
+  )
+}
 
+async function validatePasswordUserId( password, userId ){
+  return getObject( userId, "user" ).password.read()
+    .then( p => {
+      if ( p==password ) return userId;
+      else throw "Unmatching password"
+    })
 }
 
 
 
-async function isPasswordCorrectForUserId( password, userId ){
-  getObject( userId, "user" ).password.read()
-    .then( p => p==password ) 
-}
 
 
 
-
-
-
-
-
-
+/*user2ids.set("Donald").read()
+  .then( ids => antidote.update(ids.map( id => id2users.set(id).add("Roger"))) ) // */
 
 // insert dummy user
 //insertDummyUsers()
@@ -720,7 +849,7 @@ server.post('/api/replays/:chirpId', handleWithAuth( async (req,userId) =>
  * Register user to the server
  */
 server.post('/api/register/', handle( async req => 
-  registerUser( data.user, data.password, data.mail )
+  registerUser( req.body.user, req.body.password, req.body.mail )
     .then( userId => ({userId:userId}) )
 ) )
 /** 
@@ -774,13 +903,48 @@ server.post('/api/login/', handle(async req => {
   if ( ! idSet || idSet.length==0 ) throw "User unknown";
   else if ( idSet.length == 1 ) {
     let userId = idSet[0]
-    return await isPasswordCorrectForUserId( password, userId )
-      .then( success => {
-        if ( success ) return ({userId:userId})
-        else throw "Unmatching password"
+    return await id2users.set(userId).read()
+      .then( nameSet => {
+        if ( !nameSet || nameSet.length == 0 ) throw "Internal error (storage user name)"
+        else if ( nameSet.length > 1 ) return ({duplicatedName:nameSet, userId:userId})
+        else return validatePasswordUserId( password, userId )
+                      .then( id => ({userId:id}) )
       })
   } else return ({duplicatedUser:true})
 }));
+/**
+ * resolve a conflict of one id associated with two names.
+ * the req.body is meant to be an object like
+ * {
+ *    user: <...>,
+ *    password: <...>,
+ *    email: <...>,
+ *    userId: <...>,
+ *    newUser: <...>
+ * }.
+ * if the email is associated at the oldest user, this function works as a login and returns the id.
+ * otherwise, it will be asked to the user to change the name
+ */
+server.post('/api/rename/', handle(async req => {
+  let user = req.body.user
+  let password = req.body.password
+  let email = req.body.email
+  let newUser = req.body.newUser
+  let userId = req.body.userId
+  console.log ( `Re-naming ${userId}.(${user}, ${password}, ${email}) to ${newUser}` )
+  if ( user && password && email && newUser && userId )
+    return await resetUserName( userId, user, email, password, newUser )
+      .then( _=> ({userId:userId}))
+      .catch( _=> ({
+        toBeChanged: true,
+        userId : userId,
+        user: user,
+        email : email,
+        password : password
+      }) )
+    else throw "One of the fields is empty"
+}))
+
 /**
  * resolve a conflict of names.
  * the req.body is meant to be an object like
@@ -797,15 +961,26 @@ server.post('/api/conflict/', handle(async req => {
   let password = req.body.password
   let email = req.body.email
   let idSet = await user2ids.set(user).read()
+  let userId;
   if ( ! idSet || idSet.length==0 ) throw "User unknown";
-  else if ( idSet.length == 1 ) {
-    let userId = idSet[0]
-    return await getObject( userId, "user" ).password.read()
-      .then( p => { 
-          if (p==password) return ({userId:userId}) 
-          else throw "Unmatching password"
-      })
-  } else return ({duplicatedUser:true})
+  else if ( idSet.length > 1 ){ 
+    let result = await resolveUserDuplication( idSet, email )
+    if ( result.status == "ok" ) userId = result.userId
+    else return mirror (" --- --- Conflict >>",{ // ask the user to chose another name.
+      toBeChanged: true,
+      userId : result.userId,
+      user: user,
+      email : email,
+      password : password
+    })
+  }else userId = idSet[0]
+  return await validatePasswordUserId( password, userId )
+    .then( id => id2users.set(id).read() )
+    .then( nameSet => {
+      if ( !nameSet || nameSet.length == 0 ) throw "Internal error (storage user name)"
+      if ( nameSet.length > 1 ) resolveNameDuplication(userId, nameSet, user)        
+      return {userId:userId}
+    })
 }));
 /**
  * returns the id associated with the user name provided as a param.
