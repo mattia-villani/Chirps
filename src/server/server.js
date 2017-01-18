@@ -7,7 +7,6 @@ let antidoteClient = require( 'antidote_ts_client');
 let errorhandler = require('errorhandler');
 let morgan = require('morgan');
 let bodyParser = require('body-parser');
-let validator = require('validator');
 let CircularJSON = require('circular-json')
 
 let server = express();
@@ -28,6 +27,9 @@ if (process.env.NODE_ENV === 'development') {
 let antidote = antidoteClient.connect(process.env.ANTIDOTE_PORT || 8087, process.env.ANTIDOTE_HOST || "localhost");
 antidote.defaultBucket = "chirps";
 
+let justThrow = e => { throw e }
+
+
 //-----
 // Database Schema:
 /**
@@ -43,7 +45,6 @@ antidote.defaultBucket = "chirps";
  *              writtenChirps : <set of written chirpIds>
  *              writtenReplays : <set of written replayIds to chirpIds>
  *              followers : <set of userIds of users that follow this user>
- *              followerCounter : <counter of followers that this user has>
  *              following : <set of userIds of users that are followed by this>
  *              timeline : <set of chirpIds that are pushed to this user timeline>
  *            }
@@ -79,10 +80,10 @@ let dbSchema = {
           ["writtenChirps",     "set"],
           ["writtenReplays",    "set"],
           ["followers",         "set"], // following this
-          ["followerCounter",   "counter"],
           ["following",         "set"], // the ones this is following
           ["timeline",          "set"],
           ["chirpIdToBePulled", "set"],
+          ["chirpIdPushed",     "set"],
           ["lastPullableChirp", "register"],
           ["lastPushedChirp",   "register"],
         ],
@@ -104,6 +105,7 @@ let dbSchema = {
           ["mergedTo",          "register"], // this means that the key was merged to the content value
           ["lastPull",          "register"], // (u,v)'last pull is the time when v has pulled for the last time u 
           ["lastPush",          "register"], // (u,v)'last pull is the time when u has pushed for the last time to v
+          ["followingFrom",     "register"], // (u,v)'last pull is the time when u was followed by v
   ]
 }
 
@@ -173,13 +175,17 @@ function getUserSet() {
 /**
  * properties = array of  [ <entity>, <attribute>, <type> ]
  */
-function readPropertiesFromIds( ids, properties, tx=undefined ){
-    return antidoteReadBatch( 
+function readPropertiesFromIds( ids, properties, tx=undefined ){  
+  return antidoteReadBatch( 
       properties.map( (e,i) => {
-        console.log(" --- --- --- read << CrdtMap "+e[0]+"."+e[1]+"."+e[2]+".("+ids[i]+")")
+        console.log(" --- --- --- read << CrdtMap "+e[0]+"."+e[1]+"."+e[2]+"("+ids[i]+")")
         return getCrdtMap(e[0], e[1], e[2], tx)[e[2]](ids[i]) 
       })
-    )
+    ).then( vals => {
+      console.log("Reading properties ids.length=("+ids.length+"), properties.length=("+properties.length+"):")
+      ids.map( (id,i) => console.log("\t\tProperty("+properties[i]+")("+id+")  :=  "+vals[i])) 
+      return vals;
+    })
 }
 
 /**
@@ -212,16 +218,20 @@ function registerUser ( user, password, email ){
     .then( tx => {
       let userId = createId("user")
       let userObj = getObject(userId, "user", tx)      
+      let time = Date.now()
       return tx.update( [ 
         getUser2ids(tx).set(user).add(userId),
         getId2users(tx).set(userId).add(user),
         userObj.password.set(password),
         userObj.email.set(email),
-        userObj.time.set( Date.now() ),
+        userObj.time.set( time ),
         userObj.followers.add( userId ),
         userObj.following.add( userId ),
-        userObj.followerCounter.increment(1)
-      ] )
+        userObj.lastPullableChirp.set( time ),
+        userObj.lastPushedChirp.set( time ),
+      ].concat( 
+          getAddRelationUpdate( userId, userId, getCombinedId(userId,userId), time ) 
+      ))
       .then( _ => tx.commit() )
       .then ( _ => userId )
       .catch( e => { tx.commit(); throw e;})
@@ -311,12 +321,131 @@ async function validateId(id){
  * Function to dispatch a chirpId to the followers of a userId
  */
 async function dispatchChirpId ( chirpId, userId ){
-  userId = await resolveId( userId ).catch( e =>{ throw e; } )
-  if ( true ) // pushing
-    return getObject( userId, "user" ).followers.read()
-      .then( set => antidote.update( 
-          set.map( e => getObject( e, "user" ).timeline.add(chirpId) )
-      ))
+  console.log("/// /// DISTPATCHING \\\\\\ \\\\\\");
+  userId = await resolveId( userId ).catch(justThrow)
+  let tx = await antidote.startTransaction().catch(justThrow)
+  
+  let user = getObject( userId, "user", tx )
+  let followers = await user.followers.read().then( us => resolveIds(us, tx)).catch(justThrow)
+
+  let chirpTime = await getObject(chirpId, "chirp", tx).time.read().catch(justThrow)
+
+  let pull = //Math.floor((Math.random() * 10) + 1)% 2 == 0;
+    followers && followers.length && limitOfFollowersForPushing < followers.length
+
+  let promis;
+  if ( !pull ){
+    console.log( "||| -- pushing -- "); 
+    console.log( "||| \t lastPullableChirp "+chirpTime ); 
+    console.log( "||| \t chirpIdPushed "+chirpId );  
+    console.log( "||| \t Followers "+followers );
+    console.log( "||| \t LastPush updated at "+chirpTime+" for "+ followers.map( e => getCombinedId(userId,e) ) );     
+    promis = tx.update( // pushing
+      followers.map( e => getObject( e, "user", tx ).timeline.add(chirpId) )
+      .concat( followers.map( e => getObject( getCombinedId(userId,e), "id2Ids", tx ).lastPush.set(chirpTime) ) )
+      .concat( [ user.chirpIdPushed.add(chirpId) ] )
+      .concat( [ user.lastPushedChirp.set( chirpTime ) ] )
+    )
+  }else{
+    console.log( "||| -- pulling -- "); 
+    console.log( "||| \t lastPullableChirp "+chirpTime ); 
+    console.log( "||| \t chirpIdToBePulled "+chirpId ); 
+    promis = tx.update([ 
+        user.lastPullableChirp.set(chirpTime),
+        user.chirpIdToBePulled.add(chirpId),
+      ]);
+  }
+  console.log("\\\\\\ \\\\\\ DISTPATCHED /// ///");
+  return promis.then( _ => tx.commit() ).catch(justThrow)
+}
+/**
+ * Collects the chirps from the list of chirp of the followed user 
+ */
+async function collect( userId_ToBeVerified ){
+  console.log("collecting chirps for user "+userId_ToBeVerified)
+  let chirpIdToBePulledProp = ['user','chirpIdToBePulled','set']
+  let chirpIdPushedProp = ['user','chirpIdPushed','set']
+  let lastPullableProp = ['user','lastPullableChirp','register']
+  let lastPushedProp = ['user','lastPushedChirp','register']
+  let lastPullProp = ['id2Ids','lastPull','register']
+  let lastPushProp = ['id2Ids','lastPush','register']
+  let followingFrom = ['id2Ids','followingFrom','register']
+ 
+  let collectFrom = async ( tx, userId, followedId, lastTime, followingFromTime, chirpId_prop, last_prop ) => {
+    console.log("COLLECTING CHIRPS:"
+      +"\n\tUserId "+ userId
+      +"\n\tFollowedId "+followedId
+      +"\n\tLastTime "+lastTime
+      +"\n\tFollowingFromTime "+followingFromTime
+      +"\n\tChirpId(toBePulled|pushed)Prop "+chirpId_prop
+      +"\n\tLast(Pull|Push)Prop "+last_prop+"\n\t....")
+    let cIds = await getCrdtMap( chirpId_prop[0], chirpId_prop[1], chirpId_prop[2], tx )[chirpId_prop[2]](followedId).read()
+    cIds = cIds ? cIds : [];
+    console.log("\tQueried chirp ids "+cIds);
+    let chirpTimes =await readPropertiesFromIds(cIds, cIds.map( i => ['chirp','time','register']), tx )
+    console.log("\tQueried chirp's times "+chirpTimes);
+    let composed = getCombinedId( followedId, userId )
+    console.log("\tComposed Id "+composed);
+    let maxTime = chirpTimes.reduce( (t1, t2) => t1>t2 ? t1: t2, lastTime )
+    console.log("\tRecentest time "+maxTime);
+    let newIds = cIds.filter( (id,i) => chirpTimes[i] > followingFromTime)
+    console.log("\tFiltered ids "+newIds);
+    let timelineCrdt = getObject( userId, "user", tx ).timeline;
+    return tx.update(
+       newIds.map( i => timelineCrdt.add(i) )
+       .concat( [ 
+                 getCrdtMap( last_prop[0], last_prop[1], last_prop[2], tx )[last_prop[2]](composed).set(maxTime) 
+          ] )
+      ).then( _ => newIds )
+      .catch( e => { console.error("Error collecting chirps "+e); return []; });
+  }
+
+  return resolveId( userId_ToBeVerified )
+  .then( userId => 
+    antidote.startTransaction()
+    .then( tx => getObject( userId, "user", tx ).following.read()
+      .then( us => resolveIds(us, tx))
+      .then( following => {
+        let collectFromPull = ( followedId, lastTime, followingFromTime) => 
+          collectFrom( tx, userId, followedId, lastTime, followingFromTime, chirpIdToBePulledProp, lastPullProp)
+        let collectFromPush = ( followedId, lastTime, followingFromTime) => 
+          collectFrom( tx, userId, followedId, lastTime, followingFromTime, chirpIdPushedProp, lastPushProp)
+
+        let composed = following.map( u => getCombinedId(u,userId) )
+        console.log("IDS>> following ids:"+following)    
+        return readPropertiesFromIds(
+          following.concat(following).concat(composed).concat(composed).concat(composed),
+          following.map( e => lastPullableProp )
+          .concat( following.map( e => lastPushedProp ) )
+          .concat( composed.map( e => lastPullProp ) )
+          .concat( composed.map( e => lastPushProp ) )
+          .concat( composed.map( e => followingFrom) )
+          ,tx)
+        .then( props => {
+          console.log("Read props :"+props)
+
+          let chirpPromises = []
+          let n = following.length
+          let d = 5
+          for ( var i = 0 ; i<n; i++ ){
+            let followedId = following[i]
+            let lastPullable = props[i] 
+            let lastPushed = props[i+n] 
+            let lastPull = props[i+n*2]
+            let lastPush = props[i+n*3]
+            let followingFromTime = props[i+n*4]
+
+            if ( lastPullable != lastPull ) 
+              chirpPromises=chirpPromises.concat(collectFromPull(followedId, lastPull, followingFromTime))
+            if ( lastPushed  != lastPush ) 
+              chirpPromises=chirpPromises.concat(collectFromPush(followedId, lastPush, followingFromTime))
+          }
+          return Promise.all(chirpPromises)
+        })
+    })
+    .then( chirps => { tx.commit(); return chirps; } )
+  ))
+  .catch(justThrow)
 }
 /**
  * in the request has to be present an authorization object of the type 
@@ -334,19 +463,20 @@ function currentUser(request) {
   if (!credentials.user||!credentials.password||!credentials.userId) throw "Authorization badly formmated"
   let user = credentials.user;
   let password = credentials.password;
-  let userId = await resolveId( credentials.userId ).catch(e => {throw e})
   console.log("Verifing credentials "+JSON.stringify(credentials))
-  return id2users.set(userId).read()
-    .then( set => {
-      if( ! set || set.length == 0) throw "UserId unknown"
-      if(set.indexOf(user) == -1) throw "UserId Unmatching with the user name"
-      return getObject( userId, "user" ).password.read()
-    })
-    .then( readPassword => {
-      if ( password != readPassword) throw "Invalid password"
-      return userId
-    })
-    .catch(e => {throw "Unable to authentify user "+user+":"+userId+" ("+e+")";} )
+  return resolveId( credentials.userId ).then( userId => 
+    id2users.set(userId).read()
+      .then( set => {
+        if( ! set || set.length == 0) throw "UserId unknown"
+        if(set.indexOf(user) == -1) throw "UserId Unmatching with the user name"
+        return getObject( userId, "user" ).password.read()
+      })
+      .then( readPassword => {
+        if ( password != readPassword) throw "Invalid password"
+        return userId
+      })
+  )
+  .catch(e => {throw "Unable to authentify user "+user+":"+userId+" ("+e+")";} )
 }
 
 /**
@@ -359,27 +489,35 @@ function currentUser(request) {
  */
 async function getRelation( userIdFollowed, mineId ){
   console.log("reading relation between "+userIdFollowed+" and me "+ mineId)
-  let f_ers = await resolveIds(getObject( userIdFollowed, "user" ).followers.read())
-  let f_ing = await resolveIds(getObject( mineId, "user" ).followers.read())
-  return {
+  let f_ers = await resolveIds( await getObject( userIdFollowed, "user" ).followers.read())
+  let f_ing = await resolveIds( await getObject( mineId, "user" ).followers.read())
+  return (el => {
+    console.log("The relation is "+ JSON.stringify(el));
+    return el;
+  })({
         it_is_followed_by_me: f_ers.indexOf(mineId) != -1, 
         it_is_following_me: f_ing.indexOf(userIdFollowed) != -1
-    }
+    });
 }
 /**
  * This function add the relation userIdFollowing is following userIdFollowed
  */
+function getAddRelationUpdate( userIdFollowed, userIdFollowing, id2id, time ){
+  return [
+    getObject( userIdFollowed, "user" ).followers.add(userIdFollowing),
+    getObject( userIdFollowing, "user" ).following.add(userIdFollowed),
+    getObject( id2id, "id2Ids" ).lastPull.set(time),
+    getObject( id2id, "id2Ids" ).lastPush.set(time),
+    getObject( id2id, "id2Ids" ).followingFrom.set(time),
+  ];
+}
 function addRelalation( userIdFollowed, userIdFollowing ){
   console.log("Adding relation "+userIdFollowing+" following "+userIdFollowed)
   let time = Date.now()
   let id2id = getCombinedId( userIdFollowed, userIdFollowing )
-  return antidote.update([
-    getObject( userIdFollowed, "user" ).followers.add(userIdFollowing),
-    getObject( userIdFollowed, "user" ).followerCounter.increment(1),
-    getObject( userIdFollowing, "user" ).following.add(userIdFollowed),
-    getObject( id2id, "id2Ids" ).lastPull.set(time),
-    getObject( id2id, "id2Ids" ).lastPush.set(time),
-  ]).then(_ =>console.log("Relation updated (added)"))
+  return antidote.update(
+    getAddRelationUpdate( userIdFollowed, userIdFollowing, id2id, time )
+  ).then(_ =>console.log("Relation updated (added)"))
 }
 /**
  * This function remove the relation userIdFollowing is following userIdFollowed
@@ -392,7 +530,6 @@ function removeRelalation( userIdFollowed, userIdFollowing ){
       console.log("removing relation between "+userIdFollowed+" and "+userIdFollowing+" that does not exists"):
       (antidote.update([
         getObject( userIdFollowed, "user" ).followers.remove(userIdFollowing),
-        getObject( userIdFollowed, "user" ).followerCounter.increment(-1),
         getObject( userIdFollowing, "user" ).following.remove(userIdFollowed),
         getObject( id2id, "id2Ids" ).lastPull.set(undefined),
         getObject( id2id, "id2Ids" ).lastPush.set(undefined),
@@ -401,15 +538,10 @@ function removeRelalation( userIdFollowed, userIdFollowing ){
 }
 
 // helper to have a batch reading from antidote. It gets a map Key->antodoteObject and returns a map Key -> result.
-async function antidoteReadBatch( arr ){
-  // return antidote.readBatch( arr )
+function antidoteReadBatch( arr ){
+   return antidote.readBatch( arr )
   // JUST FOR DEBUG
-  let ret = []
-  for ( var i in arr ){
-    let val = await arr[i].read()
-    ret.push( val )
-  }
-  return ret
+  //return Promise.all(arr.map( (obj) => obj.read() ))
 }
 /**
  * this function read batchly all the chirpId present in the arg set
@@ -546,12 +678,15 @@ async function clearDB() {
 //------------------------------------------------------------------
 //------------------------------------------------------------------
 //------------------------------------------------------------------
-function resolveId( id ) { return resolveIds( [id] ) }
-function resolveIds( ids ){
-  return readPropertiesFromIds( ids, ids.map( m => ['id2Ids','mergedTo','register']) )
+function resolveId( id, tx = undefined ) { return resolveIds( [id] ).then( vals => vals[0] ) }
+function resolveIds( ids, tx = undefined ){
+  return readPropertiesFromIds( ids, ids.map( m => ['id2Ids','mergedTo','register']), tx )
     .then( vals => 
       vals.map( (id, i) => id ? id : ids[i] )
-    )
+    ).catch( e => {
+      console.error("Error resolving ids "+ids+": "+e)
+      throw e
+    })
 }
 /**
  * function that chose which id is unified.
@@ -619,8 +754,8 @@ function resolveUserDuplication( idSet, email ){
               return mergeRequest( idSet[i], idSet[j] )
                 .then( newId => 
                   resolveUserDuplication(
-                    idSet.filter( (id,I) => I!=i && I!=j ).push(newId), 
-                    email.filter( (em,I) => I!=i && I!=j ).push(emails[i])
+                    idSet.filter( (id,I) => I!=i && I!=j ).concat( [ newId ] ), 
+                    email.filter( (em,I) => I!=i && I!=j ).concat( [ emails[i] ] )
                   )
                 )
         let indexOfEmail = emails.indexOf( email )
@@ -882,8 +1017,11 @@ server.delete('/api/followers/:userId', handleWithAuth(async (req, mineId) =>
  * Gives the timeline for the current user
  */
 server.get('/api/timeline', handleWithAuth(async (req, userId) => 
-  await getObject(userId,"user").timeline.read()
-    .then( chirpIds => getSortedChirpSetFromChirpIdSet( chirpIds ) )
+  await collect( userId )
+    .then( ids =>{ 
+      mirror("The following chirp ids were added: ", ids)
+      return getObject(userId,"user").timeline.read()
+    }).then( chirpIds => getSortedChirpSetFromChirpIdSet( chirpIds ) )
 ));
 /**
  * Gives the timeline for a specific user

@@ -1,6 +1,5 @@
 import * as React from 'react';
 import { AddChirp } from './add_chirp';
-import { SearchUser } from './searchUser';
 import * as api from '../models/chirps'
 import { Router, Route, Link, browserHistory } from 'react-router';
 
