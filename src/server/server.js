@@ -84,8 +84,8 @@ let dbSchema = {
           ["timeline",          "set"],
           ["chirpIdToBePulled", "set"],
           ["chirpIdPushed",     "set"],
-          ["lastPullableChirp", "register"],
-          ["lastPushedChirp",   "register"],
+          ["numPullableChirp", "counter"],
+          ["numPushedChirp",   "counter"],
         ],
   chirp : [
           ["chirpId",           "register"],
@@ -103,10 +103,10 @@ let dbSchema = {
         ],
   id2Ids : [ // the map's key for the pair (u,v) an the attribute att (not set), is u$$v
           ["mergedTo",          "register"], // this means that the key was merged to the content value
-          ["lastPull",          "register"], // (u,v)'last pull is the time when v has pulled for the last time u 
-          ["lastPush",          "register"], // (u,v)'last pull is the time when u has pushed for the last time to v
+          ["pullNum",           "integer"], // (u,v)'last pull is the time when v has pulled for the last time u 
+          ["pushNum",           "integer"], // (u,v)'last pull is the time when u has pushed for the last time to v
           ["followingFrom",     "register"], // (u,v)'last pull is the time when u was followed by v
-  ]
+        ]
 }
 
 function getCombinedId( idA, idB ) { return idA+"$$"+idB }
@@ -227,8 +227,8 @@ function registerUser ( user, password, email ){
         userObj.time.set( time ),
         userObj.followers.add( userId ),
         userObj.following.add( userId ),
-        userObj.lastPullableChirp.set( time ),
-        userObj.lastPushedChirp.set( time ),
+/*        userObj.numPullableChirp.set( 0 ), implicit
+        userObj.numPushedChirp.set( 0 ),*/
       ].concat( 
           getAddRelationUpdate( userId, userId, getCombinedId(userId,userId), time ) 
       ))
@@ -330,28 +330,28 @@ async function dispatchChirpId ( chirpId, userId ){
 
   let chirpTime = await getObject(chirpId, "chirp", tx).time.read().catch(justThrow)
 
-  let pull = //Math.floor((Math.random() * 10) + 1)% 2 == 0;
-    followers && followers.length && limitOfFollowersForPushing < followers.length
+  let pull = Math.floor((Math.random() * 10) + 1)<5;
+    //followers && followers.length && limitOfFollowersForPushing < followers.length
 
   let promis;
   if ( !pull ){
     console.log( "||| -- pushing -- "); 
-    console.log( "||| \t lastPullableChirp "+chirpTime ); 
+    console.log( "||| \t numPullableChirp "+chirpTime ); 
     console.log( "||| \t chirpIdPushed "+chirpId );  
     console.log( "||| \t Followers "+followers );
     console.log( "||| \t LastPush updated at "+chirpTime+" for "+ followers.map( e => getCombinedId(userId,e) ) );     
     promis = tx.update( // pushing
       followers.map( e => getObject( e, "user", tx ).timeline.add(chirpId) )
-      .concat( followers.map( e => getObject( getCombinedId(userId,e), "id2Ids", tx ).lastPush.set(chirpTime) ) )
+      .concat( followers.map( e => getObject( getCombinedId(userId,e), "id2Ids", tx ).pushNum.increment(1) ) )
       .concat( [ user.chirpIdPushed.add(chirpId) ] )
-      .concat( [ user.lastPushedChirp.set( chirpTime ) ] )
+      .concat( [ user.numPushedChirp.increment( 1 ) ] )
     )
   }else{
     console.log( "||| -- pulling -- "); 
-    console.log( "||| \t lastPullableChirp "+chirpTime ); 
+    console.log( "||| \t numPullableChirp "+chirpTime ); 
     console.log( "||| \t chirpIdToBePulled "+chirpId ); 
     promis = tx.update([ 
-        user.lastPullableChirp.set(chirpTime),
+        user.numPullableChirp.increment(1),
         user.chirpIdToBePulled.add(chirpId),
       ]);
   }
@@ -365,17 +365,17 @@ async function collect( userId_ToBeVerified ){
   console.log("collecting chirps for user "+userId_ToBeVerified)
   let chirpIdToBePulledProp = ['user','chirpIdToBePulled','set']
   let chirpIdPushedProp = ['user','chirpIdPushed','set']
-  let lastPullableProp = ['user','lastPullableChirp','register']
-  let lastPushedProp = ['user','lastPushedChirp','register']
-  let lastPullProp = ['id2Ids','lastPull','register']
-  let lastPushProp = ['id2Ids','lastPush','register']
+  let lastPullableProp = ['user','numPullableChirp','counter']
+  let lastPushedProp = ['user','numPushedChirp','counter']
+  let lastPullProp = ['id2Ids','pullNum','integer']
+  let lastPushProp = ['id2Ids','pushNum','integer']
   let followingFrom = ['id2Ids','followingFrom','register']
  
-  let collectFrom = async ( tx, userId, followedId, lastTime, followingFromTime, chirpId_prop, last_prop ) => {
+  let collectFrom = async ( tx, userId, followedId, lastNum, followingFromTime, chirpId_prop, last_prop, publisherNum ) => {
     console.log("COLLECTING CHIRPS:"
       +"\n\tUserId "+ userId
       +"\n\tFollowedId "+followedId
-      +"\n\tLastTime "+lastTime
+      +"\n\LastNum "+lastNum
       +"\n\tFollowingFromTime "+followingFromTime
       +"\n\tChirpId(toBePulled|pushed)Prop "+chirpId_prop
       +"\n\tLast(Pull|Push)Prop "+last_prop+"\n\t....")
@@ -386,15 +386,15 @@ async function collect( userId_ToBeVerified ){
     console.log("\tQueried chirp's times "+chirpTimes);
     let composed = getCombinedId( followedId, userId )
     console.log("\tComposed Id "+composed);
-    let maxTime = chirpTimes.reduce( (t1, t2) => t1>t2 ? t1: t2, lastTime )
-    console.log("\tRecentest time "+maxTime);
+    let currentNum = publisherNum;
+    console.log("\Publisher num "+publisherNum);
     let newIds = cIds.filter( (id,i) => chirpTimes[i] > followingFromTime)
     console.log("\tFiltered ids "+newIds);
     let timelineCrdt = getObject( userId, "user", tx ).timeline;
     return tx.update(
        newIds.map( i => timelineCrdt.add(i) )
        .concat( [ 
-                 getCrdtMap( last_prop[0], last_prop[1], last_prop[2], tx )[last_prop[2]](composed).set(maxTime) 
+                 getCrdtMap( last_prop[0], last_prop[1], last_prop[2], tx )[last_prop[2]](composed).set(currentNum) 
           ] )
       ).then( _ => newIds )
       .catch( e => { console.error("Error collecting chirps "+e); return []; });
@@ -406,10 +406,10 @@ async function collect( userId_ToBeVerified ){
     .then( tx => getObject( userId, "user", tx ).following.read()
       .then( us => resolveIds(us, tx))
       .then( following => {
-        let collectFromPull = ( followedId, lastTime, followingFromTime) => 
-          collectFrom( tx, userId, followedId, lastTime, followingFromTime, chirpIdToBePulledProp, lastPullProp)
-        let collectFromPush = ( followedId, lastTime, followingFromTime) => 
-          collectFrom( tx, userId, followedId, lastTime, followingFromTime, chirpIdPushedProp, lastPushProp)
+        let collectFromPull = ( followedId, lastNum, followingFromTime, publisherNum) => 
+          collectFrom( tx, userId, followedId, lastNum, followingFromTime, chirpIdToBePulledProp, lastPullProp, publisherNum)
+        let collectFromPush = ( followedId, lastNum, followingFromTime, publisherNum) => 
+          collectFrom( tx, userId, followedId, lastNum, followingFromTime, chirpIdPushedProp, lastPushProp, publisherNum)
 
         let composed = following.map( u => getCombinedId(u,userId) )
         console.log("IDS>> following ids:"+following)    
@@ -436,9 +436,9 @@ async function collect( userId_ToBeVerified ){
             let followingFromTime = props[i+n*4]
 
             if ( lastPullable != lastPull ) 
-              chirpPromises=chirpPromises.concat(collectFromPull(followedId, lastPull, followingFromTime))
+              chirpPromises=chirpPromises.concat(collectFromPull(followedId, lastPull, followingFromTime, lastPullable))
             if ( lastPushed  != lastPush ) 
-              chirpPromises=chirpPromises.concat(collectFromPush(followedId, lastPush, followingFromTime))
+              chirpPromises=chirpPromises.concat(collectFromPush(followedId, lastPush, followingFromTime, lastPushed))
           }
           return Promise.all(chirpPromises)
         })
@@ -506,8 +506,8 @@ function getAddRelationUpdate( userIdFollowed, userIdFollowing, id2id, time ){
   return [
     getObject( userIdFollowed, "user" ).followers.add(userIdFollowing),
     getObject( userIdFollowing, "user" ).following.add(userIdFollowed),
-    getObject( id2id, "id2Ids" ).lastPull.set(time),
-    getObject( id2id, "id2Ids" ).lastPush.set(time),
+    getObject( id2id, "id2Ids" ).pullNum.set(0),
+    getObject( id2id, "id2Ids" ).pushNum.set(0),
     getObject( id2id, "id2Ids" ).followingFrom.set(time),
   ];
 }
@@ -531,17 +531,18 @@ function removeRelalation( userIdFollowed, userIdFollowing ){
       (antidote.update([
         getObject( userIdFollowed, "user" ).followers.remove(userIdFollowing),
         getObject( userIdFollowing, "user" ).following.remove(userIdFollowed),
-        getObject( id2id, "id2Ids" ).lastPull.set(undefined),
-        getObject( id2id, "id2Ids" ).lastPush.set(undefined),
+        antidote.map(db_id("id2Ids", "pullNum", "integer").remove(id2id) ),
+        antidote.map(db_id("id2Ids", "pushNum", "integer").remove(id2id) ),
+        antidote.map(db_id("id2Ids", "followingFrom", "register").remove(id2id) )
       ]).then(_=> console.log("Relation updated (deleted)")))
     )
 }
 
 // helper to have a batch reading from antidote. It gets a map Key->antodoteObject and returns a map Key -> result.
 function antidoteReadBatch( arr ){
-   return antidote.readBatch( arr )
+   //return antidote.readBatch( arr )
   // JUST FOR DEBUG
-  //return Promise.all(arr.map( (obj) => obj.read() ))
+  return Promise.all(arr.map( (obj) => obj.read() ))
 }
 /**
  * this function read batchly all the chirpId present in the arg set
